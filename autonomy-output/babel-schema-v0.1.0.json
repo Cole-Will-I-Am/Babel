@@ -1,0 +1,81 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://babel-protocol.org/schemas/v0.1.0/babel-document.json",
+  "title": "Babel Document v0.1.0",
+  "description": "Normative schema for Babel v0.1.0. Strict RFC 8259 JSON subset. Tier 1 validation only.",
+  "type": "object",
+  "required": ["babel", "meta"],
+  "additionalProperties": false,
+  "properties": {
+    "babel": {
+      "type": "object",
+      "description": "Protocol header. Mandatory.",
+      "required": ["version"],
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "type": "string",
+          "description": "SemVer 2.0.0 string. Pre-release tags allowed but ignored for compatibility.",
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+        }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "description": "Operation metadata. Required.",
+      "required": ["operation_type", "rollback_to"],
+      "additionalProperties": true,
+      "properties": {
+        "operation_type": {
+          "type": "string",
+          "description": "Taxonomy enum. Irreversible: commit, destroy, approve. Reversible: draft, query, suggest.",
+          "enum": ["commit", "destroy", "approve", "draft", "query", "suggest"]
+        },
+        "rollback_to": {
+          "type": ["string", "null"],
+          "description": "State hash for irreversible ops; null for reversible."
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "author": {
+          "type": "string"
+        }
+      },
+      "if": {
+        "required": ["operation_type"],
+        "properties": {
+          "operation_type": { "enum": ["commit", "destroy", "approve"] }
+        }
+      },
+      "then": {
+        "required": ["rollback_to"],
+        "properties": {
+          "rollback_to": { "type": "string", "minLength": 1 }
+        }
+      },
+      "else": {
+        "required": ["rollback_to"],
+        "properties": {
+          "rollback_to": { "type": "null" }
+        }
+      }
+    },
+    "payload": {
+      "type": "object",
+      "description": "Operation-specific content. Schema varies by operation_type; see companion specs.",
+      "additionalProperties": true
+    },
+    "ext": {
+      "type": "object",
+      "description": "Dot-namespaced extensions. Reserved prefixes: see extension registry. Unrecognized extensions are warned (minor ahead) or ignored (equal/behind) per architecture section 5.",
+      "additionalProperties": {
+        "type": ["object", "array", "string", "number", "boolean", "null"]
+      },
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
+      }
+    }
+  }
+}
