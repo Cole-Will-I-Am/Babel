@@ -5,9 +5,19 @@
   "session_log": "memory/shared/sessions.jsonl",
   "max_recent_events": 10,
   "max_signoff_loops": 3,
+  "scaffold_max_chars": 3200,
+  "required_human_docs": [
+    "README.md",
+    "CHANGELOG.md"
+  ],
   "request": {
     "temperature": 0.2,
     "top_p": 0.9
+  },
+  "model_call": {
+    "timeout_sec": 210,
+    "max_retries": 1,
+    "retry_backoff_sec": 5
   },
   "char_limits": {
     "summary": 2200,
@@ -19,7 +29,7 @@
     "list_items": 10,
     "artifact_count": 6,
     "artifact_path": 140,
-    "artifact_content": 6000
+    "artifact_content": 24000
   },
   "teams": {
     "pair_a": [
@@ -29,16 +39,18 @@
     "pair_b": [
       "deepseek",
       "minimadmax"
-    ]
+    ],
+    "implementer": "coder"
   },
   "identities": {
     "kimi": "identities/kimi.json",
     "nemotron": "identities/nemotron.json",
     "deepseek": "identities/deepseek.json",
-    "minimadmax": "identities/minimadmax.json"
+    "minimadmax": "identities/minimadmax.json",
+    "coder": "identities/coder.json"
   },
   "git": {
-    "mode": "model_delegate",
+    "mode": "direct",
     "executor_agent": "minimadmax",
     "codex_launcher": "/root/ai-lab/bin/codex-github",
     "delegate_timeout_sec": 900,

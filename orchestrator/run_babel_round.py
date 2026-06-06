@@ -55,6 +55,41 @@ def read_text_tail(path: Path, max_lines: int = 30) -> str:
     return "\n".join(lines[-max_lines:])
 
 
+def load_reasoning_scaffold(repo_root: Path, identity: dict[str, Any]) -> str:
+    raw = identity.get("reasoning_scaffold")
+    if not isinstance(raw, str) or not raw.strip():
+        return ""
+    try:
+        rel = safe_relative_path(raw)
+    except ValueError:
+        return ""
+    path = repo_root / rel
+    if not path.exists() or not path.is_file():
+        return ""
+    return path.read_text(encoding="utf-8").strip()
+
+
+def load_self_config_paths(repo_root: Path, identity: dict[str, Any]) -> list[str]:
+    raw = identity.get("self_config_paths")
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for item in raw:
+        if not isinstance(item, str) or not item.strip():
+            continue
+        try:
+            rel = safe_relative_path(item.strip())
+        except ValueError:
+            continue
+        path = repo_root / rel
+        if not path.exists() or not path.is_file():
+            continue
+        rel_posix = rel.as_posix()
+        if rel_posix not in out:
+            out.append(rel_posix)
+    return out
+
+
 def append_note(path: Path, round_id: str, stage: str, note: str) -> None:
     if not note.strip():
         return
@@ -66,14 +101,19 @@ def append_note(path: Path, round_id: str, stage: str, note: str) -> None:
         handle.write(note.strip() + "\n")
 
 
-def http_json(method: str, url: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+def http_json(
+    method: str,
+    url: str,
+    payload: dict[str, Any] | None = None,
+    timeout_sec: int = 180,
+) -> dict[str, Any]:
     data = None
     headers = {"Accept": "application/json"}
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
     req = request.Request(url, data=data, method=method, headers=headers)
-    with request.urlopen(req, timeout=180) as resp:
+    with request.urlopen(req, timeout=max(30, timeout_sec)) as resp:
         body = resp.read().decode("utf-8")
         return json.loads(body)
 
@@ -93,6 +133,7 @@ def generate_with_ollama(
     model: str,
     prompt: str,
     options: dict[str, Any],
+    timeout_sec: int,
 ) -> str:
     payload: dict[str, Any] = {
         "model": model,
@@ -101,7 +142,12 @@ def generate_with_ollama(
     }
     if options:
         payload["options"] = options
-    data = http_json("POST", ollama_url.rstrip("/") + "/api/generate", payload)
+    data = http_json(
+        "POST",
+        ollama_url.rstrip("/") + "/api/generate",
+        payload,
+        timeout_sec=timeout_sec,
+    )
     response = data.get("response", "")
     return response if isinstance(response, str) else ""
 
@@ -166,6 +212,7 @@ def stage_directive(stage: str) -> str:
         return (
             "Produce final artifacts as file entries and resolve all required changes. "
             "Return artifacts as objects with path and full content. "
+            "Always include updated README.md and CHANGELOG.md artifacts for human-readable tracking. "
             "Include commit_message suitable for git commit. "
             "Set signoff=true only if your artifacts are ready to merge."
         )
@@ -173,6 +220,16 @@ def stage_directive(stage: str) -> str:
         return (
             "Perform final reviewer signoff on minimadmax artifacts. "
             "Set signoff=true only if ready for commit and push."
+        )
+    if stage == "implement":
+        return (
+            "The spec for this round is signed off. Produce RUNNABLE reference code that "
+            "implements it. Return artifacts as objects with path and full content, written "
+            "ONLY under reference/ (code) and reference/tests/ (unittest tests). Reuse "
+            "orchestrator/canonical.py for canonical serialization; do not reinvent it. Do not "
+            "modify frozen specs or autonomy-output/. Implement exactly what the spec defines; "
+            "record assumptions where it is ambiguous. Include a commit_message. Set signoff=true "
+            "only if the code is complete and its tests would pass."
         )
     return "Advance the task with precise output."
 
@@ -243,6 +300,63 @@ def apply_char_limits(response: dict[str, Any], limits: dict[str, Any]) -> dict[
     return response
 
 
+def normalize_required_paths(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    out: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            continue
+        try:
+            rel = safe_relative_path(item.strip()).as_posix()
+        except ValueError:
+            continue
+        if rel not in out:
+            out.append(rel)
+    return out
+
+
+def artifact_paths(response: dict[str, Any]) -> set[str]:
+    out: set[str] = set()
+    for item in parse_artifacts(response.get("artifacts")):
+        try:
+            rel = safe_relative_path(item["path"]).as_posix()
+        except ValueError:
+            continue
+        out.add(rel)
+    return out
+
+
+def enforce_required_artifacts(
+    response: dict[str, Any], required_paths: list[str], char_limits: dict[str, Any]
+) -> dict[str, Any]:
+    if not required_paths:
+        return response
+    present = artifact_paths(response)
+    missing = [path for path in required_paths if path not in present]
+    if not missing:
+        return response
+
+    summary_prefix = "Required docs missing; signoff forced false."
+    summary = str(response.get("summary", "")).strip()
+    response["summary"] = f"{summary_prefix} {summary}".strip()
+
+    blocker = f"Missing required docs artifacts: {', '.join(missing)}."
+    blocking_issues = as_str_list(response.get("blocking_issues"))
+    if blocker not in blocking_issues:
+        blocking_issues.insert(0, blocker)
+    response["blocking_issues"] = blocking_issues
+
+    required_changes = as_str_list(response.get("required_changes"))
+    for path in missing:
+        change = f"Add or update {path} with human-readable round updates."
+        if change not in required_changes:
+            required_changes.append(change)
+    response["required_changes"] = required_changes
+    response["signoff"] = False
+    return apply_char_limits(response, char_limits)
+
+
 def as_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -303,6 +417,34 @@ def normalize_response(
     }
 
 
+def build_model_failure_response(
+    *,
+    fallback_from: str,
+    fallback_to: str,
+    stage: str,
+    attempts: int,
+    errors_seen: list[str],
+) -> dict[str, Any]:
+    recent_errors = errors_seen[-3:] if errors_seen else ["unknown model call error"]
+    detail = " | ".join(recent_errors)
+    return {
+        "from": fallback_from,
+        "to": fallback_to,
+        "summary": f"Agent runtime failure after {attempts} model call attempts.",
+        "decisions": [],
+        "blocking_issues": [f"Model call failed: {detail}"],
+        "required_changes": [
+            "Retry this stage after model endpoint stabilizes.",
+            "Continue with fail-safe path and keep signoff=false until retry succeeds.",
+        ],
+        "memory_note": f"Model call failure at stage {stage}: {detail}",
+        "signoff": False,
+        "artifacts": [],
+        "commit_message": "",
+        "stage": stage,
+    }
+
+
 def build_prompt(
     identity: dict[str, Any],
     stage: str,
@@ -313,6 +455,9 @@ def build_prompt(
     agent_recent: list[dict[str, Any]],
     notes_tail: str,
     char_limits: dict[str, Any],
+    reasoning_scaffold: str,
+    scaffold_max_chars: int,
+    self_config_paths: list[str],
 ) -> str:
     payload = {
         "from": identity["id"],
@@ -333,6 +478,9 @@ def build_prompt(
 
     lines: list[str] = []
     lines.append("You are running in a fully autonomous multi-agent engineering workflow.")
+    lines.append("There is no human in the loop for planning, approval, signoff, or execution.")
+    lines.append("Do not request human input, human review, or human signoff.")
+    lines.append("Only model-to-model handoff and signoff are valid.")
     lines.append(f"Stage: {stage}")
     lines.append(f"Task: {task}")
     lines.append(f"Agent id: {identity['id']}")
@@ -347,6 +495,21 @@ def build_prompt(
     lines.append(f"Next owner: {next_owner}")
     lines.append("Directive:")
     lines.append(stage_directive(stage))
+    if self_config_paths:
+        lines.append("")
+        lines.append("Self-configuration authority:")
+        lines.append(
+            "You may update your own configuration by returning artifacts with full file content for these paths:"
+        )
+        lines.append(json.dumps(self_config_paths, ensure_ascii=True))
+        lines.append(
+            "If this stage is not producing artifacts, put requested config edits in required_changes so the next artifact-writing stage can apply them."
+        )
+        lines.append("Do not request human approval for config edits.")
+    if reasoning_scaffold and scaffold_max_chars > 0:
+        lines.append("")
+        lines.append("Reasoning scaffold (follow exactly; keep output content grounded in current repo context):")
+        lines.append(reasoning_scaffold[:scaffold_max_chars])
     lines.append("")
     lines.append("Recent incoming collaboration context:")
     lines.append(json.dumps(in_view, ensure_ascii=True))
@@ -384,6 +547,10 @@ def call_agent(
     round_id: str,
     repo_root: Path,
     char_limits: dict[str, Any],
+    scaffold_max_chars: int,
+    model_timeout_sec: int,
+    model_max_retries: int,
+    model_retry_backoff_sec: float,
 ) -> dict[str, Any]:
     agent_id = str(identity["id"])
     memory = identity["memory"]
@@ -392,6 +559,8 @@ def call_agent(
     shared_recent = read_jsonl(shared_log, max_recent_events)
     agent_recent = read_jsonl(agent_log, max_recent_events)
     notes_tail = read_text_tail(notes_path, max_lines=40)
+    reasoning_scaffold = load_reasoning_scaffold(repo_root, identity)
+    self_config_paths = load_self_config_paths(repo_root, identity)
 
     prompt = build_prompt(
         identity=identity,
@@ -403,6 +572,9 @@ def call_agent(
         agent_recent=agent_recent,
         notes_tail=notes_tail,
         char_limits=char_limits,
+        reasoning_scaffold=reasoning_scaffold,
+        scaffold_max_chars=scaffold_max_chars,
+        self_config_paths=self_config_paths,
     )
     started = time.monotonic()
     print(
@@ -410,12 +582,62 @@ def call_agent(
         file=sys.stderr,
         flush=True,
     )
-    raw = generate_with_ollama(
-        ollama_url=ollama_url,
-        model=str(identity["model"]),
-        prompt=prompt,
-        options=request_options,
-    )
+    attempt_count = max(1, int(model_max_retries) + 1)
+    retry_backoff = max(0.0, float(model_retry_backoff_sec))
+    transport_errors: list[str] = []
+    raw = ""
+    for attempt_idx in range(1, attempt_count + 1):
+        try:
+            raw = generate_with_ollama(
+                ollama_url=ollama_url,
+                model=str(identity["model"]),
+                prompt=prompt,
+                options=request_options,
+                timeout_sec=model_timeout_sec,
+            )
+            break
+        except (error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
+            err_msg = f"{type(exc).__name__}: {exc}"
+            transport_errors.append(err_msg)
+            print(
+                f"[{utc_now()}] stage={stage} agent={agent_id} model={identity['model']} status=retry attempt={attempt_idx}/{attempt_count} error={err_msg}",
+                file=sys.stderr,
+                flush=True,
+            )
+            if attempt_idx < attempt_count and retry_backoff > 0:
+                time.sleep(retry_backoff * attempt_idx)
+    else:
+        elapsed = time.monotonic() - started
+        response = build_model_failure_response(
+            fallback_from=agent_id,
+            fallback_to=next_owner,
+            stage=stage,
+            attempts=attempt_count,
+            errors_seen=transport_errors,
+        )
+        response = apply_char_limits(response, char_limits)
+        event = {
+            "timestamp": utc_now(),
+            "round_id": round_id,
+            "stage": stage,
+            "task": task,
+            "agent_id": agent_id,
+            "model": identity["model"],
+            "incoming": [sanitize_for_prompt(item) for item in incoming][-6:],
+            "response": response,
+            "raw_response": "",
+            "transport_errors": transport_errors,
+        }
+        append_jsonl(agent_log, event)
+        append_jsonl(shared_log, event)
+        append_note(notes_path, round_id, stage, response.get("memory_note", ""))
+        print(
+            f"[{utc_now()}] stage={stage} agent={agent_id} model={identity['model']} status=done elapsed_sec={elapsed:.1f} signoff={response.get('signoff', False)} transport_failures={len(transport_errors)}",
+            file=sys.stderr,
+            flush=True,
+        )
+        return response
+
     elapsed = time.monotonic() - started
     candidate = extract_json_object(raw)
     response = normalize_response(
@@ -436,12 +658,13 @@ def call_agent(
         "incoming": [sanitize_for_prompt(item) for item in incoming][-6:],
         "response": response,
         "raw_response": raw,
+        "transport_errors": transport_errors,
     }
     append_jsonl(agent_log, event)
     append_jsonl(shared_log, event)
     append_note(notes_path, round_id, stage, response.get("memory_note", ""))
     print(
-        f"[{utc_now()}] stage={stage} agent={agent_id} model={identity['model']} status=done elapsed_sec={elapsed:.1f} signoff={response.get('signoff', False)}",
+        f"[{utc_now()}] stage={stage} agent={agent_id} model={identity['model']} status=done elapsed_sec={elapsed:.1f} signoff={response.get('signoff', False)} retries_used={len(transport_errors)}",
         file=sys.stderr,
         flush=True,
     )
@@ -705,6 +928,24 @@ def main() -> int:
     char_limits = config.get("char_limits", {})
     if not isinstance(char_limits, dict):
         char_limits = {}
+    scaffold_max_chars = int(config.get("scaffold_max_chars", 5000))
+    if scaffold_max_chars < 0:
+        scaffold_max_chars = 0
+    model_call_cfg = config.get("model_call", {})
+    if not isinstance(model_call_cfg, dict):
+        model_call_cfg = {}
+    model_timeout_sec = int(model_call_cfg.get("timeout_sec", 180))
+    if model_timeout_sec < 30:
+        model_timeout_sec = 30
+    model_max_retries = int(model_call_cfg.get("max_retries", 2))
+    if model_max_retries < 0:
+        model_max_retries = 0
+    model_retry_backoff_sec = float(model_call_cfg.get("retry_backoff_sec", 4.0))
+    if model_retry_backoff_sec < 0:
+        model_retry_backoff_sec = 0.0
+    required_human_docs = normalize_required_paths(
+        config.get("required_human_docs", ["README.md", "CHANGELOG.md"])
+    )
     shared_log = repo_root / str(config.get("shared_memory_log", "memory/shared/context.jsonl"))
     session_log = repo_root / str(config.get("session_log", "memory/shared/sessions.jsonl"))
 
@@ -722,6 +963,13 @@ def main() -> int:
             print(f"error: missing identity for agent id: {agent_id}", file=sys.stderr)
             return 3
 
+    # Optional post-signoff implementer (writes reference code). Non-fatal if absent.
+    implementer_raw = teams.get("implementer")
+    implementer_id = str(implementer_raw).strip() if implementer_raw else ""
+    if implementer_id and implementer_id not in identity_map:
+        print(f"warning: implementer '{implementer_id}' has no identity; skipping implement stage", file=sys.stderr)
+        implementer_id = ""
+
     try:
         available_models = fetch_model_catalog(ollama_url)
     except (error.URLError, TimeoutError, json.JSONDecodeError) as exc:
@@ -733,6 +981,12 @@ def main() -> int:
         if model not in available_models:
             print(f"error: model not installed in Ollama: {model}", file=sys.stderr)
             return 5
+
+    if implementer_id:
+        impl_model = str(identity_map[implementer_id]["model"])
+        if impl_model not in available_models:
+            print(f"warning: implementer model not installed: {impl_model}; skipping implement stage", file=sys.stderr)
+            implementer_id = ""
 
     round_id = args.round_id or uuid.uuid4().hex[:12]
     max_loops = args.max_signoff_loops or int(config.get("max_signoff_loops", 3))
@@ -754,6 +1008,10 @@ def main() -> int:
         round_id=round_id,
         repo_root=repo_root,
         char_limits=char_limits,
+        scaffold_max_chars=scaffold_max_chars,
+        model_timeout_sec=model_timeout_sec,
+        model_max_retries=model_max_retries,
+        model_retry_backoff_sec=model_retry_backoff_sec,
     )
 
     nemotron = call_agent(
@@ -769,6 +1027,10 @@ def main() -> int:
         round_id=round_id,
         repo_root=repo_root,
         char_limits=char_limits,
+        scaffold_max_chars=scaffold_max_chars,
+        model_timeout_sec=model_timeout_sec,
+        model_max_retries=model_max_retries,
+        model_retry_backoff_sec=model_retry_backoff_sec,
     )
 
     deepseek_review = call_agent(
@@ -784,6 +1046,10 @@ def main() -> int:
         round_id=round_id,
         repo_root=repo_root,
         char_limits=char_limits,
+        scaffold_max_chars=scaffold_max_chars,
+        model_timeout_sec=model_timeout_sec,
+        model_max_retries=model_max_retries,
+        model_retry_backoff_sec=model_retry_backoff_sec,
     )
 
     minimadmax = call_agent(
@@ -799,7 +1065,12 @@ def main() -> int:
         round_id=round_id,
         repo_root=repo_root,
         char_limits=char_limits,
+        scaffold_max_chars=scaffold_max_chars,
+        model_timeout_sec=model_timeout_sec,
+        model_max_retries=model_max_retries,
+        model_retry_backoff_sec=model_retry_backoff_sec,
     )
+    minimadmax = enforce_required_artifacts(minimadmax, required_human_docs, char_limits)
 
     deepseek_signoff = call_agent(
         stage="pair_b_signoff",
@@ -814,6 +1085,10 @@ def main() -> int:
         round_id=round_id,
         repo_root=repo_root,
         char_limits=char_limits,
+        scaffold_max_chars=scaffold_max_chars,
+        model_timeout_sec=model_timeout_sec,
+        model_max_retries=model_max_retries,
+        model_retry_backoff_sec=model_retry_backoff_sec,
     )
 
     attempt = 1
@@ -832,7 +1107,12 @@ def main() -> int:
             round_id=round_id,
             repo_root=repo_root,
             char_limits=char_limits,
+            scaffold_max_chars=scaffold_max_chars,
+            model_timeout_sec=model_timeout_sec,
+            model_max_retries=model_max_retries,
+            model_retry_backoff_sec=model_retry_backoff_sec,
         )
+        minimadmax = enforce_required_artifacts(minimadmax, required_human_docs, char_limits)
         deepseek_signoff = call_agent(
             stage=f"pair_b_resignoff_{attempt}",
             task=args.task,
@@ -846,6 +1126,10 @@ def main() -> int:
             round_id=round_id,
             repo_root=repo_root,
             char_limits=char_limits,
+            scaffold_max_chars=scaffold_max_chars,
+            model_timeout_sec=model_timeout_sec,
+            model_max_retries=model_max_retries,
+            model_retry_backoff_sec=model_retry_backoff_sec,
         )
 
     dual_signoff = bool(minimadmax.get("signoff")) and bool(deepseek_signoff.get("signoff"))
@@ -882,6 +1166,64 @@ def main() -> int:
             }
             files_to_commit = write_artifacts(repo_root, [fallback])
         commit_message = minimadmax.get("commit_message", "").strip() or f"Babel autonomy round {round_id}"
+
+        # Post-signoff implementer: turn the approved spec into runnable reference code.
+        # Fully non-fatal — a coder failure must never block the spec commit.
+        if implementer_id:
+            try:
+                spec_blocks: list[str] = []
+                budget = 24000
+                for art in minimadmax.get("artifacts", []):
+                    if not isinstance(art, dict):
+                        continue
+                    p, c = str(art.get("path", "")), str(art.get("content", ""))
+                    if not p or not c:
+                        continue
+                    chunk = f"\n=== FILE: {p} ===\n{c}\n"
+                    if budget - len(chunk) < 0:
+                        break
+                    spec_blocks.append(chunk)
+                    budget -= len(chunk)
+                coder_task = (
+                    f"{args.task}\n\n"
+                    "The following Babel specification artifacts were signed off this round. "
+                    "Implement runnable, tested reference code for them under reference/.\n"
+                    + "".join(spec_blocks)
+                )
+                coder = call_agent(
+                    stage="implement",
+                    task=coder_task,
+                    next_owner="git",
+                    identity=identity_map[implementer_id],
+                    incoming=[minimadmax, deepseek_signoff],
+                    ollama_url=ollama_url,
+                    request_options=request_options,
+                    shared_log=shared_log,
+                    max_recent_events=max_recent_events,
+                    round_id=round_id,
+                    repo_root=repo_root,
+                    char_limits=char_limits,
+                    scaffold_max_chars=scaffold_max_chars,
+                    model_timeout_sec=model_timeout_sec,
+                    model_max_retries=model_max_retries,
+                    model_retry_backoff_sec=model_retry_backoff_sec,
+                )
+                raw_code_arts = coder.get("artifacts", []) if isinstance(coder.get("artifacts"), list) else []
+                code_artifacts = [
+                    a for a in raw_code_arts
+                    if isinstance(a, dict) and str(a.get("path", "")).startswith("reference/")
+                ]
+                dropped = len(raw_code_arts) - len(code_artifacts)
+                if dropped:
+                    print(f"[{utc_now()}] stage=implement note=dropped_{dropped}_non_reference_artifacts", file=sys.stderr, flush=True)
+                if code_artifacts:
+                    code_files = write_artifacts(repo_root, code_artifacts)
+                    files_to_commit = list(dict.fromkeys(files_to_commit + code_files))
+                    print(f"[{utc_now()}] stage=implement status=wrote files={len(code_files)}", file=sys.stderr, flush=True)
+                else:
+                    print(f"[{utc_now()}] stage=implement status=no_reference_artifacts", file=sys.stderr, flush=True)
+            except Exception as exc:  # noqa: BLE001 - never block the spec commit
+                print(f"[{utc_now()}] stage=implement status=error error={type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
     else:
         files_to_commit = write_failure_report(repo_root, round_id, args.task, minimadmax, deepseek_signoff)
         commit_message = f"Babel autonomy round {round_id} failed dual signoff"

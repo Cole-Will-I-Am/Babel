@@ -116,6 +116,22 @@ def canonicalize_json(raw: bytes) -> bytes:
     return ("".join(out) + "\n").encode("utf-8")
 
 
+def canonical_json(obj: Any) -> str:
+    """Canonical v0.2.0 JSON *string* for a Python value or raw JSON.
+
+    Accepts a dict/list/scalar (serialized then canonicalized), or raw JSON
+    given as str/bytes. Returns the canonical text including its single LF
+    terminator. This is the convenience entrypoint reference code imports.
+    """
+    if isinstance(obj, bytes):
+        raw = obj
+    elif isinstance(obj, str):
+        raw = obj.encode("utf-8")
+    else:
+        raw = json.dumps(obj).encode("utf-8")
+    return canonicalize_json(raw).decode("utf-8")
+
+
 def canonical_bytes(path: Path) -> bytes:
     raw = path.read_bytes()
     if path.suffix == ".json":
