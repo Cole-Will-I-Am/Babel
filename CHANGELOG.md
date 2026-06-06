@@ -2,48 +2,67 @@
 
 All notable changes to the Babel protocol artifacts are recorded here.
 
-## 2026-06-06 - Babel v0.8.1 remediation amendments (final)
+## 2026-06-06 - Babel v0.9.0 BWCC (cycle 1 of 4, in progress)
 
-Authored three additive amendment artifacts over frozen v0.1.0-v0.7.0 and v0.8.0, resolving all three DeepSeek v0.8.1 audit blocking issues plus the log-compaction clarification:
+Authored the first of four v0.9.0 specification documents under the
+single-artifact-per-finalize protocol. BWCC v0.9.0 is strictly
+additive over frozen v0.1.0-v0.8.1.
 
-- **BCRP v0.8.1**: Corrected result ordering to (canonical SHA-256 hex, sequence number) lexicographic sort. Explicitly documented that this does NOT match append order; pagination cursor resumes from the strict successor in the composite sort. Defined cursor invalidation behavior after log compaction: gateway returns `cursor_invalid` error if both file and persistent log index entry are gone; client MUST restart from `cursor=null` to guarantee forward progress.
+- **BWCC v0.9.0 — Static Workflow Envelope**:
+  - `workflow_definition` schema: `task_ids` (non-empty, unique,
+    regex `^[a-zA-Z0-9_.-]{1,64}$`) and `depends_on`
+    (`object<string,string[]>`) with all keys and values members of
+    `task_ids`.
+  - `workflow_id = "sha256:" + hex(SHA-256(canonical_json(workflow_definition)))`
+    per v0.2.0 canonical serialization.
+  - Tier-1 validation: schema check, Kahn's algorithm O(n+e) cycle
+    detection, no self-loops. Reject codes `BWCC_CYCLE` and
+    `BWCC_BAD_REFERENCE` with BSS exit 2.
+  - `workflow_amend` is explicitly NON-RETROACTIVE: in-flight tasks
+    under `previous_workflow_id` continue unchanged; amendment
+    affects only pending tasks and future invocations of the new
+    `workflow_id`.
+  - Amendment chain acyclicity: ancestors traversed via
+    `previous_workflow_id`; reject duplicate workflow_id in chain
+    (`BWCC_AMEND_CYCLE`) and chains > 256 (`BWCC_CHAIN_TOO_LONG`).
+  - Workflow-level XRP cascade: a task's XRP publishes only after
+    all upstream `depends_on` tasks complete or fail; failed
+    upstream propagates `BWCC_UPSTREAM_FAIL` to all transitive
+    downstream tasks which emit `status: "cancelled"`.
 
-- **BSDC v0.8.1**: Specified deterministic LCS tie-breaking rule: when multiple LCS of equal maximum length exist, prefer the one retaining the lexicographically earliest tuples at the first differing index. Added four normative test vectors covering simple add, remove, replace, and nested object add. Post-application re-canonicalization (v0.2.0 NFC + sorted keys + deterministic numbers + single LF) verified against target.
+## Process Note: single-artifact-per-finalize
 
-- **BRAP v0.8.1**: Bounded the amend cycle: after original author submits revised document D' (with `meta.amend_of` referencing the amend review), the reviewer MUST issue `approve` or `reject`; no second amend is permitted. The three termination paths (author revision, timeout failure proxy, reviewer reject conversion) remain unchanged. Concurrent termination attempts resolve via CDR hash ordering (first canonical SHA-256 wins).
+v0.9.0 materialization adopts the single-artifact-per-finalize
+protocol to bound model output and prevent `pair_b_finalize`
+timeouts. Each cycle authors exactly one spec; ordering is BWCC,
+BSSC, BHOP, manifest. README and CHANGELOG update in every cycle.
 
-- **v0.8.1 manifest**: Lists BCRP, BSDC, BRAP v0.8.1 amendments with `canonical_sha256` placeholders for pre-commit hook computation. References frozen v0.8.0 manifest via `frozen_manifest_ref`.
+## 2026-06-06 - Babel v0.8.1 remediation amendments (frozen)
 
-All v0.8.1 artifacts are strictly additive; no frozen field is mutated. Cross-references to v0.8.0 BCRP/BSDC/BRAP remain valid as the base layer.
+Authored three additive amendment artifacts over frozen v0.1.0-v0.7.0
+and v0.8.0, resolving all three DeepSeek v0.8.1 audit blocking
+issues plus the log-compaction clarification.
 
-## 2026-06-06 - Babel v0.7.0 toolchain, workspace, and integration tests (final)
+- **BCRP v0.8.1**: Composite cursor key `(canonical_sha256, seq)`
+  sorted lexicographically (NOT append order). Cursor invalidation
+  after log compaction emits `cursor_invalid` requiring restart
+  from `cursor=null`.
+- **BRAP v0.8.1**: Amend cycle bounded — after original author
+  emits a revised document, the reviewer MUST issue `approve` or
+  `reject`; no second `amend` decision is permitted per review per
+  document.
+- **BSDC v0.8.1**: Deterministic LCS tie-breaking preferring the
+  lexicographically earliest tuples in sorted key-path order at the
+  first differing index, with four normative test vectors.
 
-Authored three additive integration layers over frozen v0.1.0-v0.6.0, resolving all five DeepSeek v0.7.0 audit issues:
+## 2026-06-06 - Babel v0.8.0 base direction (frozen)
 
-- **TIC v0.7.0**: platform field in manifest.json, filename triplet (linux-amd64, darwin-arm64, windows-amd64), reproducible tar flags, POSIX-only self-check.sh using packaged binaries only
-- **WCP v0.7.0**: explicit .gitignore entries for .inbox/.processing/.processed/.invalid and handoff-log tmp/lock files; .gitattributes for binary JSON and LF-normalized BSS
-- **ITP v0.7.0**: crash handling via signal/exit-code mapping to ITP exit 10, schema-first validation (exit 20) then byte comparison, platform-independent golden files
+Added BCRP cursor pagination, BRAP review and amend protocol, and
+BSDC structured diff as the v0.8.0 base layer.
 
-## 2026-06-06 - Babel v0.6.0 surface syntax and implementation contracts (final)
+## 2026-06-06 - Babel v0.7.0 toolchain, workspace, and integration tests (frozen)
 
-Authored three additive artifacts over frozen v0.1.0-v0.5.1:
-
-- **BSS v0.6.0**: strict JSON5 subset with exhaustive forbidden constructs, bss_to_json canonicalization to v0.2.0
-- **AIC v0.6.0**: babel-emit, babel-validate, babel-hash CLI tools with deterministic exit codes 0/1/2/3; babel-hash canonicalizes BSS internally before SHA-256
-- **HIG v0.6.0**: .babel ingestion via ext.kimi.source_ext, atomic .inbox->.processing->.processed flow, startup recovery for orphaned .processing files
-
-## 2026-06-06 - Babel v0.5.1 remediation amendments (final)
-
-Resolved all five blocking gaps from DeepSeek's v0.5.0 audit. All amendments strictly additive over frozen v0.1.0-v0.5.0.
-
-## 2026-06-06 - Babel v0.3.0 milestone architecture (revised)
-
-Resolved the DeepSeek audit blocking issue: M1 and M2 could not safely run in parallel. Introduced M0 (Reference Parser Contract implementation) as a strict prerequisite for both M1 and M2. M1 and M2 may run in parallel after M0; M3 remains sequential.
-
-## 2026-06-06 - Babel v0.2.0 final
-
-Canonical serialization (NFC, deterministic numbers, single LF), handoff log (unique naming, fork resolution, genesis rule, async validation). All v0.1.0 contracts inherited unchanged.
-
-## 2026-06-06 - Babel v0.1.0 frozen
-
-Strict RFC 8259 JSON, SemVer with patch-agnostic compatibility, equal-minor silent-ignore extensions, operation_type enum with conditional rollback_to.
+Authored TIC (reproducible packaging with platform field and POSIX
+self-check), WCP (gitignore and gitattributes for workspace
+coexistence), and ITP (cross-platform acceptance testing with
+schema-first then byte-compare validation order).
