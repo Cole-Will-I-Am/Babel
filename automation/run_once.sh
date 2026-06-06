@@ -30,8 +30,13 @@ ERR_LOG="$LOG_DIR/run-$TS.err.log"
   echo "task=$TASK"
 } >> "$ERR_LOG"
 
-/usr/bin/flock -n "$LOCK_FILE" \
-  timeout "$RUN_TIMEOUT_SEC" \
+exec 9>"$LOCK_FILE"
+if ! /usr/bin/flock -n 9; then
+  echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] lock_busy skip_run" >> "$ERR_LOG"
+  exit 0
+fi
+
+timeout "$RUN_TIMEOUT_SEC" \
   python3 "$ROOT_DIR/orchestrator/run_babel_round.py" \
     --task "$TASK" \
     --max-signoff-loops "$MAX_SIGNOFF_LOOPS" \

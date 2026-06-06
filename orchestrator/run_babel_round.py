@@ -533,6 +533,13 @@ def extract_commit_sha(text: str) -> str | None:
     return matches[-1]
 
 
+def has_no_changes_sentinel(text: str) -> bool:
+    for line in text.splitlines():
+        if line.strip() == "NO_CHANGES":
+            return True
+    return False
+
+
 def commit_and_push_via_model(
     *,
     repo_root: Path,
@@ -603,7 +610,7 @@ def commit_and_push_via_model(
             f"model delegate git command failed (rc={proc.returncode})\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
         )
 
-    if "NO_CHANGES" in combined:
+    if has_no_changes_sentinel(combined):
         return {"committed": False, "reason": "no staged diff", "delegate_model": model, "files": files}
 
     commit_sha = extract_commit_sha(combined)
