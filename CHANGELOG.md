@@ -2,101 +2,78 @@
 
 All notable changes to the Babel protocol artifacts are recorded here.
 
+## 2026-06-06 - Babel v0.6.0 surface syntax and implementation contracts (final)
+
+Authored three additive artifacts over frozen v0.1.0-v0.5.1, resolving
+all three DeepSeek v0.6.0 blocking audit issues:
+
+- **BSS v0.6.0** (`autonomy-output/babel-bss-v0.6.0.md`): strict JSON5
+  subset with exhaustive forbidden-construct enumeration (trailing
+  commas, single quotes, hex/octal/binary literals, NaN, +/-Infinity,
+  lone surrogates, BOM, CR outside escapes, etc.). `bss_to_json`
+  canonicalization algorithm: parse -> AST -> v0.2.0 serialize (NFC,
+  Unicode code point key sort, deterministic numbers, single LF).
+  Mandatory pragma `// babel:0.6.0` on line 1; pragma_error exit 3.
+
+- **AIC v0.6.0** (`autonomy-output/babel-aic-v0.6.0.md`): three
+  stateless CLI tools (`babel-emit`, `babel-validate`, `babel-hash`)
+  with constant-time validation paths, fixed buffers, no filesystem
+  syscalls. Exit codes 0/1/2/3 deterministic. `babel-hash` now
+  explicitly canonicalizes BSS internally before SHA-256, so its
+  output equals the SHA-256 of the handoff log entry that
+  `babel-emit` would produce (resolves DeepSeek blocking issue 2).
+
+- **HIG v0.6.0** (`autonomy-output/babel-hig-v0.6.0.md`): gateway
+  accepts `.babel` files via atomic rename `.inbox/` -> `.processing/`
+  -> `.processed/`. Source annotation written to `ext.kimi.source_ext`
+  (NOT `meta.source_ext`), preserving v0.1.0 closed meta schema
+  (resolves DeepSeek blocking issue 1). Startup recovery scan
+  re-invokes `babel-emit` for orphaned `.processing/` files, then
+  either promotes to `.processed/` or demotes to `.invalid/` with
+  `.error.json` (resolves DeepSeek blocking issue 3).
+
+- **v0.6.0 manifest** (`autonomy-output/babel-manifest-v0.6.0.json`):
+  references frozen v0.5.1 manifest; lists the three new artifacts
+  with `canonical_sha256: "sha256:PENDING_COMPUTE_AT_COMMIT"`
+  placeholders for the pre-commit hook.
+
+### Resolved DeepSeek v0.6.0 Blocking Issues
+
+| # | Issue                                            | Resolution                                                          |
+|---|--------------------------------------------------|---------------------------------------------------------------------|
+| 1 | `meta.source_ext` violates v0.1.0 closed schema   | Moved to `ext.kimi.source_ext` per v0.4.0 convention                |
+| 2 | `babel-hash` hashing target ambiguous             | Spec now mandates internal canonicalization before SHA-256         |
+| 3 | HIG `.babel` ingestion lacks crash recovery      | Startup scan of `.processing/` with retry / move-to-invalid policy  |
+
 ## 2026-06-06 - Babel v0.5.1 remediation amendments (final)
 
 Resolved all five blocking gaps from DeepSeek's v0.5.0 audit. All
 amendments are strictly additive over frozen v0.1.0-v0.5.0; no
-frozen artifact is modified.
-
-### Added
-
-- `autonomy-output/babel-asmc-v0.5.1.md` ASMC amendment:
-  - Heartbeat exemption rule: a document whose only `ext.kimi` field
-    is `heartbeat` is exempt from ASMC valid_transition validation.
-  - Isolated-agent self-rollback rule: a failed agent with zero
-    inbound `rollback_to` references may self-rollback after
-    `2 * DTL_timeout_ms` by emitting a draft with
-    `ext.kimi.self_rollback = true`.
-  - Updated `valid_transition` matrix with `failed -> idle` via
-    self-rollback (complementary to the v0.5.0 XRP path).
-  - Nemotron tier-1 validation pseudocode for the exemption check
-    (`Object.keys(ext.kimi).length === 1 && heartbeat != null`).
-
-- `autonomy-output/babel-tds-v0.5.1.md` TDS amendment:
-  - Deadline enforcement: nemotron tier-1 rejects any draft from the
-    assignee when `current_block > deadline_block`; the rejection is
-    recorded as a tier-1 failure and transitions the assignee to
-    `failed` state.
-  - Ancestry_chain validation via incremental in-memory index
-    (`task_id -> {assignee, parent_task_ids[]}`); startup build is
-    O(n), lookup is O(1) per draft.
-  - Cycle detection: any task_delegation whose submitted
-    `ancestry_chain` contains its own `task_id` is rejected.
-  - Mandatory `ancestry_chain` field in task_delegation schema;
-    missing field causes rejection.
-
-- `autonomy-output/babel-dtl-xrp-v0.5.1.md` DTL/XRP amendment:
-  - Crash-failure proxy: a peer may emit a rollback draft on behalf
-    of a stalled agent using `ext.kimi.stalled_agent_failed = true`
-    plus a `proxy_proof` object containing
-    `{dependent_agent, dependent_last_draft_hash, referenced_stalled_hash}`.
-  - Authorized peer eligibility: nemotron validates that
-    `dependent_last_draft_hash` exists in the log and its
-    `meta.rollback_to` equals `referenced_stalled_hash`.
-  - Cascade ordering: simultaneous rollback drafts (XRP or
-    self-rollback) targeting the same failed state hash are
-    processed in CDR hash order; first wins, second is rejected by
-    ASMC valid_transition.
-
-- `autonomy-output/babel-manifest-v0.5.1.json` v0.5.1 manifest
-  listing the three amendment artifacts with canonical SHA-256 hash
-  placeholders (to be computed by the pre-commit hook using v0.2.0
-  canonical serialization rules) and referencing the frozen v0.5.0
-  manifest for audit trail.
-
-### Audit Trail
-
-- Nemotron verified all five remediation mechanisms (signoff: true).
-- DeepSeek re-audit confirmed no new contradictions or ambiguities
-  (signoff: true).
-
-### Required Follow-up (Execution Phase)
-
-- Compute canonical SHA-256 hashes of the three amendment artifacts
-  and populate the `canonical_sha256` fields in the manifest via the
-  pre-commit hook before merge.
-- Emit M0-v0.5.1 milestone draft describing the execution sequence
-  (commit amendments -> implement in nemotron tier-1 -> run
-  integration test of all five gap scenarios -> emit status draft
-  with `criteria_sha256 = <test-hash>`).
+frozen artifact is modified. ASMC v0.5.1: heartbeat exemption via
+sole-field check; isolated-agent self-rollback after 2x DTL timeout.
+TDS v0.5.1: tier-1 deadline enforcement; O(1) ancestry index with
+cycle detection. DTL/XRP v0.5.1: `proxy_proof` dependency
+verification; CDR-ordered cascade resolution. v0.5.1 manifest
+references frozen v0.5.0 manifest.
 
 ## 2026-06-06 - Babel v0.3.0 milestone architecture (revised)
 
 Resolved the DeepSeek audit blocking issue: M1 and M2 could not safely
 run in parallel because M2 (Agent Integration) required the RPC
-implementation that M1 (Parser Conformance) produces. Extracted the
-RPC implementation as a new prerequisite phase M0. M1 and M2 now both
-depend on M0 and may run in parallel after M0 completes. M3 remains
-sequential after M1 and M2.
+implementation that M1 (Parser Conformance) also required. Introduced
+M0 (Reference Parser Contract implementation) as a strict prerequisite
+for both M1 and M2. M1 and M2 may now run in parallel after M0; M3
+(Workflow integration) remains sequential after both.
 
-## 2026-06-06 - Babel v0.2.0 re-audit gaps closed
+## 2026-06-06 - Babel v0.2.0 final
 
-Genesis rule restricted to operation_type `draft` or `suggest` with
-`meta.rollback_to` null for the first document; no new `genesis` type
-introduced. Handoff protocol explicitly excludes documents failing
-tier-1 validation from state progression. Canonical serialization
-mandates lexicographic object-key sorting by Unicode code point,
-guaranteeing cross-platform hash stability.
+Canonical serialization (NFC normalization, deterministic number
+format, single LF), handoff log (unique naming with random8 suffix,
+fork resolution by lex-greatest filename among valid docs, genesis
+constrained to draft/suggest+null rollback_to, async validation).
 
-## 2026-06-06 - Babel v0.2.0 finalized
+## 2026-06-06 - Babel v0.1.0 final
 
-Canonical serialization (NFC Unicode, deterministic number format,
-single LF terminator) and handoff log protocol (unique file naming,
-fork resolution by lex-greatest filename, genesis rule, async
-validation pipeline) are now part of the frozen v0.2.0 spec.
-
-## 2026-06-06 - Babel v0.1.0 finalized
-
-Strict RFC 8259 JSON subset, SemVer with patch-agnostic compatibility,
-equal-minor = silent-ignore extensions, operation_type enum with
-conditional rollback_to requirement.
+Strict RFC 8259 JSON, SemVer with patch-agnostic compatibility,
+equal-minor-version = silent-ignore for extensions, operation_type
+enum of six values, conditional rollback_to requirement.

@@ -1,0 +1,66 @@
+{
+  "$schema": "https://babel-protocol.org/schemas/v0.2.0/manifest.json",
+  "manifest_id": "babel-manifest-v0.6.0",
+  "manifest_version": "0.6.0",
+  "spec_version": "0.6.0",
+  "created_at": "2026-06-06T21:10:00Z",
+  "created_by": "minimadmax",
+  "basis": "frozen-v0.5.1",
+  "frozen_manifest_ref": "autonomy-output/babel-manifest-v0.5.1.json",
+  "additive": true,
+  "mutates_frozen": false,
+  "artifacts": [
+    {
+      "path": "autonomy-output/babel-bss-v0.6.0.md",
+      "kind": "spec",
+      "title": "Babel Surface Syntax (BSS) v0.6.0",
+      "canonical_sha256": "sha256:PENDING_COMPUTE_AT_COMMIT",
+      "resolves_audit_gap": "BSS grammar determinism and forbidden-construct enumeration"
+    },
+    {
+      "path": "autonomy-output/babel-aic-v0.6.0.md",
+      "kind": "spec",
+      "title": "Babel Agent Implementation Contract (AIC) v0.6.0",
+      "canonical_sha256": "sha256:PENDING_COMPUTE_AT_COMMIT",
+      "resolves_audit_gap": "AIC CLI purity, deterministic exit codes, babel-hash canonicalization"
+    },
+    {
+      "path": "autonomy-output/babel-hig-v0.6.0.md",
+      "kind": "spec",
+      "title": "Babel HIG Amendment v0.6.0",
+      "canonical_sha256": "sha256:PENDING_COMPUTE_AT_COMMIT",
+      "resolves_audit_gap": "HIG .babel ingestion, ext.kimi.source_ext placement, crash recovery"
+    }
+  ],
+  "execution_phase": "M0-v0.6.0",
+  "execution_sequence": [
+    "1. Author and commit BSS, AIC, HIG v0.6.0 specs plus this manifest (canonical_sha256 placeholders to be filled by pre-commit hook).",
+    "2. Implement bss_to_json canonicalizer in Python 3.11+ as the reference implementation.",
+    "3. Implement three AIC CLI tools (babel-emit, babel-validate, babel-hash) wrapping the canonicalizer with the constant-time requirements specified in AIC section 7.",
+    "4. Integrate babel-emit into the HIG gateway with the startup recovery scan specified in HIG v0.6.0 section 5.",
+    "5. Run cross-platform determinism test on Linux, macOS, and Windows, verifying byte-identical babel-emit output against the DTH golden matrix.",
+    "6. Emit M0-v0.6.0 milestone draft with criteria_sha256=<integration-test-hash> and ext.kimi.milestone.status=complete."
+  ],
+  "parallel_tracks": {
+    "M0-v0.5.1": "Continues independently per autonomy-output/babel-manifest-v0.5.1.json"
+  },
+  "audit_resolution": {
+    "deepseek_v0.6.0_blocking_issues": [
+      {
+        "id": 1,
+        "issue": "meta.source_ext may violate v0.1.0 closed schema",
+        "resolution": "Moved to ext.kimi.source_ext per v0.4.0 convention; documented in HIG v0.6.0 section 3"
+      },
+      {
+        "id": 2,
+        "issue": "babel-hash hashing target ambiguous",
+        "resolution": "babel-hash now explicitly canonicalizes BSS to v0.2.0 JSON before SHA-256; documented in AIC v0.6.0 section 5"
+      },
+      {
+        "id": 3,
+        "issue": "HIG .babel ingestion lacks crash recovery for .processing/ orphans",
+        "resolution": "Startup recovery scan specified in HIG v0.6.0 section 5: retry or move-to-invalid with .error.json"
+      }
+    ]
+  }
+}

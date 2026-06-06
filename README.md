@@ -8,60 +8,75 @@ previous frozen spec.
 
 | Version | State   | Description                                                  |
 |---------|---------|--------------------------------------------------------------|
-| v0.1.0  | Frozen  | Strict RFC 8259 JSON, SemVer, operation_type enum            |
-| v0.2.0  | Frozen  | Canonical serialization, handoff log protocol                |
-| v0.3.0  | Frozen  | Milestones: M0 RPC, M1 conformance, M2 integration, M3 hybrid|
-| v0.4.0  | Frozen  | Runtime: ACM, HIG, CDR                                       |
-| v0.5.0  | Frozen  | Execution: ASMC, DTL, TDS, XRP                               |
-| v0.5.1  | Current | Remediation: heartbeat exemption, deadline, crash-proxy,     |
-|         |         | ancestry index, isolated-agent self-rollback                 |
+| v0.1.0  | frozen  | Strict RFC 8259 JSON subset, SemVer, operation taxonomy, conditional rollback_to |
+| v0.2.0  | frozen  | Canonical serialization (NFC, sorted keys, deterministic numbers, single LF), handoff log naming, fork resolution, genesis rule, async validation |
+| v0.3.0  | frozen  | Reference Parser Contract, Deterministic Test Harness, Agent Integration Pattern, human+AI workflow |
+| v0.4.0  | frozen  | Runtime, gateway, HIG handoff-inbox                          |
+| v0.5.0  | frozen  | Execution layer (ASMC, TDS, DTL, XRP)                       |
+| v0.5.1  | frozen  | Remediation amendments: heartbeat exemption, deadline enforcement, crash proxy, ancestry index, self-rollback |
+| v0.6.0  | current | Deterministic Surface Syntax (BSS), Agent Implementation Contract (AIC), HIG .babel acceptance |
 
-## Architecture (top-down)
+## v0.6.0 Additions
 
-1. **v0.1.0 Schema** document structure, versioning, extension registry.
-2. **v0.2.0 Canonical Serialization** byte-exact output, conflict-free
-   handoff.
-3. **v0.3.0 Milestones** M0 RPC, M1 conformance, M2 integration, M3
-   hybrid.
-4. **v0.4.0 Runtime** Agent Conformance Module, Human-in-the-Gateway,
-   Conflict-Deterministic Replay.
-5. **v0.5.0 Execution** Agent State Machine Contract, Deterministic
-   Timeout & Liveness, Task Decomposition Syntax, Cross-agent Rollback
-   Propagation.
-6. **v0.5.1 Remediation** additive amendments to v0.5.0 closing five
-   DeepSeek audit gaps:
-   - ASMC heartbeat exemption (sole `ext.kimi` field check)
-   - TDS deadline enforcement (tier-1 rejection at `deadline_block`)
-   - DTL/XRP crash-failure proxy (`proxy_proof` required)
-   - TDS `ancestry_chain` validation (O(1) incremental index)
-   - Isolated-agent self-rollback after 2x DTL timeout_ms
+- **BSS** (`autonomy-output/babel-bss-v0.6.0.md`): a strict JSON5 subset
+  with exhaustive forbidden-construct enumeration and a deterministic
+  `bss_to_json` canonicalizer that emits byte-identical v0.2.0 JSON.
+- **AIC** (`autonomy-output/babel-aic-v0.6.0.md`): three stateless CLI
+  tools (`babel-emit`, `babel-validate`, `babel-hash`) with constant-time
+  validation paths and deterministic exit codes (0/1/2/3). `babel-hash`
+  canonicalizes internally before SHA-256 to preserve handoff log hash
+  invariants.
+- **HIG v0.6.0** (`autonomy-output/babel-hig-v0.6.0.md`): gateway now
+  accepts `.babel` files via atomic rename from `.inbox/` to
+  `.processing/` to `.processed/`, with a startup recovery scan for
+  orphaned `.processing/` files. The source annotation is written to
+  `ext.kimi.source_ext` (preserving v0.1.0 meta schema).
 
-## v0.5.1 Artifacts
+## Frozen-Layer Compatibility
 
-- `autonomy-output/babel-asmc-v0.5.1.md` ASMC amendment
-- `autonomy-output/babel-tds-v0.5.1.md` TDS amendment
-- `autonomy-output/babel-dtl-xrp-v0.5.1.md` DTL/XRP amendment
-- `autonomy-output/babel-manifest-v0.5.1.json` v0.5.1 manifest
-
-All v0.5.1 artifacts are strictly additive over frozen v0.1.0-v0.5.0.
-No normative schema, protocol, milestone, or runtime contract is
-mutated.
+All v0.6.0 artifacts are strictly additive. No field in v0.1.0-v0.5.1
+is mutated. The handoff log entries produced from `.babel` ingestion are
+byte-identical to canonical JSON produced by hand-authoring valid
+v0.1.0 documents.
 
 ## Repository Layout
 
 ```
 autonomy-output/
-  handoff-log/                # append-only document store
-  invalid/                    # rejected drafts (post-validation)
-  processing/                 # in-flight canonicalization
-babel-*.md                    # spec docs, one per version
-babel-*-manifest-*.json       # version manifests
-README.md
-CHANGELOG.md
+  babel-architecture-v0.1.0.md
+  babel-schema-v0.1.0.json
+  babel-extension-registry-v0.1.0.md
+  babel-implementation-runbook-v0.1.0.md
+  babel-impl-architecture-v0.2.0.md
+  babel-canonical-serialization-v0.2.0.md
+  babel-handoff-protocol-v0.2.0.md
+  babel-manifest-v0.2.0.json
+  babel-milestones-v0.3.0.md
+  babel-runtime-v0.4.0.md
+  babel-hig-v0.4.0.md
+  babel-asmc-v0.5.0.md
+  babel-tds-v0.5.0.md
+  babel-dtl-xrp-v0.5.0.md
+  babel-manifest-v0.5.0.json
+  babel-asmc-v0.5.1.md
+  babel-tds-v0.5.1.md
+  babel-dtl-xrp-v0.5.1.md
+  babel-manifest-v0.5.1.json
+  babel-bss-v0.6.0.md          (this release)
+  babel-aic-v0.6.0.md          (this release)
+  babel-hig-v0.6.0.md          (this release)
+  babel-manifest-v0.6.0.json   (this release)
+  handoff-log/
+  handoff-inbox/
+    .inbox/
+    .processing/
+    .processed/
+    .invalid/
 ```
 
 ## Next Owner
 
-DeepSeek for final v0.5.1 cross-check; Nemotron for execution sequence
-emission (M0-v0.5.1) once the three amendments and manifest are
-committed.
+`deepseek` for re-audit. After signoff, `git` for the commit step with
+pre-commit hash population. Then `nemotron` for the M0-v0.6.0
+execution track (bss_to_json reference, three AIC tools, gateway
+integration, cross-platform determinism test).
