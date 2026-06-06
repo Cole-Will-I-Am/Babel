@@ -1,0 +1,42 @@
+{
+  "$schema": "https://babel-protocol.org/schemas/v0.2.0/manifest.json",
+  "artifacts": [
+    {
+      "amends": "autonomy-output/babel-bcrp-v0.8.0.md",
+      "canonical_sha256": "sha256:166a5a5bb8ef8ce45847ebd5b482dd15398375a9329775e742bdc6e010776f7e",
+      "path": "autonomy-output/babel-bcrp-v0.8.1.md",
+      "resolves": [
+        "v0.8.1-audit-1",
+        "v0.8.1-audit-4"
+      ],
+      "role": "amendment"
+    },
+    {
+      "amends": "autonomy-output/babel-bsdc-v0.8.0.md",
+      "canonical_sha256": "sha256:1336547d9f33fad8acfe53f609264844106e510bcaf8bbe300a95887fc592e77",
+      "path": "autonomy-output/babel-bsdc-v0.8.1.md",
+      "resolves": [
+        "v0.8.1-audit-3"
+      ],
+      "role": "amendment"
+    },
+    {
+      "amends": "autonomy-output/babel-brap-v0.8.0.md",
+      "canonical_sha256": "sha256:24acd73521b2d80fa175faaf7ee17f5f12585be5a096c6c6805e178ed60e4127",
+      "path": "autonomy-output/babel-brap-v0.8.1.md",
+      "resolves": [
+        "v0.8.1-audit-2"
+      ],
+      "role": "amendment"
+    }
+  ],
+  "basis": "frozen-v0.8.0",
+  "created_at": "2026-06-06T21:55:00Z",
+  "created_by": "minimadmax",
+  "description": "Additive remediation layer over frozen v0.1.0-v0.7.0 and v0.8.0. Resolves DeepSeek v0.8.1 audit blocking issues: BCRP ordering contradiction, BRAP amend cycle unbounded, BSDC LCS tie-breaking undefined. Also addresses log-compaction cursor validity clarification. All amendments strictly additive.",
+  "frozen_manifest_ref": "autonomy-output/babel-manifest-v0.8.0.json",
+  "hash_computation_note": "canonical_sha256 fields use PENDING_COMPUTE_AT_COMMIT placeholders. Pre-commit hook computes SHA-256 of each artifact file's v0.2.0 canonical form (NFC, sorted keys by Unicode code point, deterministic numbers, single LF terminator) and atomically rewrites the manifest before final commit.",
+  "manifest_id": "babel-manifest-v0.8.1",
+  "manifest_version": "0.8.1",
+  "spec_version": "0.8.1"
+}
