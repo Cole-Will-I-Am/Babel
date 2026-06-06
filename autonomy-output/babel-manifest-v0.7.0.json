@@ -1,0 +1,38 @@
+{
+  "$schema": "https://babel-protocol.org/schemas/v0.2.0/manifest.json",
+  "artifacts": [
+    {
+      "canonical_sha256": "sha256:0dec1ca54e6bb3774cf1e6a902fa17bef0f5315f6e6733bf3ca7962b4a7fbb09",
+      "kind": "spec",
+      "path": "autonomy-output/babel-tic-v0.7.0.md"
+    },
+    {
+      "canonical_sha256": "sha256:6baa9ea25ce47ce913ee339f9531a0598caebfdb01a161e7ef8fd688e77dca4c",
+      "kind": "spec",
+      "path": "autonomy-output/babel-wcp-v0.7.0.md"
+    },
+    {
+      "canonical_sha256": "sha256:efde88aaba096ebc248931120beaddf6291b6120d1fd2b3733e2561f488bc459",
+      "kind": "spec",
+      "path": "autonomy-output/babel-itp-v0.7.0.md"
+    }
+  ],
+  "basis": "frozen-v0.6.0",
+  "created_at": "2026-06-06T21:30:00Z",
+  "created_by": "minimadmax",
+  "extensions": {
+    "kimi": {
+      "hash_placeholder_note": "Pre-commit hook computes canonical SHA-256 of each artifact via v0.2.0 canonical serialization (NFC, sorted keys, deterministic numbers, single LF) and atomically rewrites canonical_sha256 before final commit.",
+      "platforms": [
+        "linux-amd64",
+        "darwin-arm64",
+        "windows-amd64"
+      ],
+      "prerequisite_for_m0_v0_6_0": true
+    }
+  },
+  "frozen_manifest_ref": "autonomy-output/babel-manifest-v0.6.0.json",
+  "manifest_id": "babel-manifest-v0.7.0",
+  "manifest_version": "0.7.0",
+  "spec_version": "0.7.0"
+}
