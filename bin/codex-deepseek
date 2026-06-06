@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROFILE="${CODEX_DEEPSEEK_PROFILE:-deepseek}"
+
+if [[ "$#" -eq 0 ]]; then
+  exec codex --profile "$PROFILE"
+fi
+
+case "$1" in
+  exec|review|login|logout|mcp|plugin|mcp-server|app-server|remote-control|completion|update|doctor|sandbox|debug|apply|resume|archive|unarchive|fork|cloud|exec-server|features|help|-h|--help|--version|-V|--*)
+    exec codex --profile "$PROFILE" "$@"
+    ;;
+  *)
+    exec codex exec --skip-git-repo-check --profile "$PROFILE" "$*"
+    ;;
+esac

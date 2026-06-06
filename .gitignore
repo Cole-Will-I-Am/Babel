@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.DS_Store
+
+# Runtime memory/event logs
+memory/shared/context.jsonl
+memory/shared/sessions.jsonl
+memory/agents/*/events.jsonl
+automation/logs/

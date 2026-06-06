@@ -1,0 +1,50 @@
+{
+  "version": "2",
+  "ollama_url": "http://127.0.0.1:11434",
+  "shared_memory_log": "memory/shared/context.jsonl",
+  "session_log": "memory/shared/sessions.jsonl",
+  "max_recent_events": 10,
+  "max_signoff_loops": 3,
+  "request": {
+    "temperature": 0.2,
+    "top_p": 0.9
+  },
+  "char_limits": {
+    "summary": 2200,
+    "decision_item": 420,
+    "blocking_item": 420,
+    "required_item": 420,
+    "memory_note": 500,
+    "commit_message": 160,
+    "list_items": 10,
+    "artifact_count": 6,
+    "artifact_path": 140,
+    "artifact_content": 6000
+  },
+  "teams": {
+    "pair_a": [
+      "kimi",
+      "nemotron"
+    ],
+    "pair_b": [
+      "deepseek",
+      "minimadmax"
+    ]
+  },
+  "identities": {
+    "kimi": "identities/kimi.json",
+    "nemotron": "identities/nemotron.json",
+    "deepseek": "identities/deepseek.json",
+    "minimadmax": "identities/minimadmax.json"
+  },
+  "git": {
+    "mode": "model_delegate",
+    "executor_agent": "minimadmax",
+    "codex_launcher": "/root/ai-lab/bin/codex-github",
+    "delegate_timeout_sec": 900,
+    "remote": "origin",
+    "branch": "main",
+    "auto_commit": true,
+    "auto_push": true
+  }
+}

@@ -1,0 +1,16 @@
+[Unit]
+Description=Babel autonomous collaboration loop (one-shot)
+After=network-online.target ollama.service
+Wants=network-online.target ollama.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/root/ai-lab/Babel
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/root/ai-lab/Babel/automation/run_once.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+TimeoutStartSec=20min

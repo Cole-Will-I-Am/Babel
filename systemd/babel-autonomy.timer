@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Babel autonomous loop every 5 minutes (test cadence)
+
+[Timer]
+OnCalendar=*:0/5
+AccuracySec=15s
+RandomizedDelaySec=20s
+Persistent=true
+Unit=babel-autonomy.service
+
+[Install]
+WantedBy=timers.target

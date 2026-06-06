@@ -1,0 +1,8 @@
+model = "kimi-k2.6:cloud"
+model_provider = "ollama"
+oss_provider = "ollama"
+model_context_window = 262144
+model_reasoning_effort = "high"
+
+[tui.model_availability_nux]
+"kimi-k2.6:cloud" = 4

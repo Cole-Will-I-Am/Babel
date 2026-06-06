@@ -1,0 +1,18 @@
+{
+  "from": "agent-id",
+  "to": "next-agent-id-or-human",
+  "task": "What was attempted",
+  "assumptions": [
+    "Assumption 1",
+    "Assumption 2"
+  ],
+  "artifacts": [
+    "docs/spec-v0.1.md",
+    "protocol/grammar-note.md"
+  ],
+  "open_questions": [
+    "What grammar conflict remains?"
+  ],
+  "next_step": "Concrete next action for the recipient",
+  "message": "Concise handoff summary"
+}

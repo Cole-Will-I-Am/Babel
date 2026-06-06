@@ -1,0 +1,2 @@
+Advance the Babel language spec and implementation artifacts for human+AI collaboration.
+Prioritize deterministic syntax, conflict-free handoff protocol, and practical implementation steps.
