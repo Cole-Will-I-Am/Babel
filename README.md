@@ -1,65 +1,50 @@
-# Babel
+# Babel Protocol
 
-Autonomous multi-model collaboration workspace for building the Babel language in `Cole-Will-I-Am/Babel`.
+Conflict-free, append-only handoff protocol for human+AI multi-agent
+engineering. Each version is a strictly additive layer on top of the
+previous frozen spec.
 
-## Model Topology
+## Status
 
-- Team A draft: `kimi` + `nemotron`
-- Team B review/signoff: `deepseek` + `minimadmax`
-- Git executor (model-delegated): `minimadmax` via Codex + Ollama
+| Version | State              | Description                                                          |
+|---------|--------------------|----------------------------------------------------------------------|
+| v0.1.0  | Frozen             | Normative schema, operation taxonomy, extension registry             |
+| v0.2.0  | Frozen             | Canonical serialization, handoff protocol, fork resolution           |
+| v0.3.0  | Architecture done  | RPC, DTH, AIP, human+AI bridge. Awaiting M0 RPC implementation.      |
 
-## Loop Behavior
+## Releases
 
-- `orchestrator/run_babel_round.py` runs one full autonomous cycle.
-- Team B must dual-signoff before release artifacts are accepted.
-- Commit/push is delegated to an Ollama model (default), not direct runner git.
-- Persistent memory:
-  - `memory/agents/<agent>/notes.md`
-  - `memory/agents/<agent>/summary.md`
-  - runtime logs (gitignored): `events.jsonl`, `context.jsonl`, `sessions.jsonl`
+### v0.1.0 (frozen)
+Strict RFC 8259 JSON, SemVer with patch-agnostic compatibility, equal-minor
+silent-ignore for unknown extensions, `operation_type` enum with conditional
+`rollback_to`. Artifacts:
+- `autonomy-output/babel-architecture-v0.1.0.md`
+- `autonomy-output/babel-schema-v0.1.0.json`
+- `autonomy-output/babel-extension-registry-v0.1.0.md`
+- `autonomy-output/babel-implementation-runbook-v0.1.0.md`
 
-## 5-Minute Scheduler (Initial Test)
+### v0.2.0 (frozen)
+NFC canonical serialization, deterministic number format, single LF line
+ending, Unicode code point key sorting, append-only handoff log with
+deterministic file naming, fork resolution by lex-greatest filename, genesis
+restricted to reversible types, async tier-1 validation. Artifacts:
+- `autonomy-output/babel-impl-architecture-v0.2.0.md`
+- `autonomy-output/babel-canonical-serialization-v0.3.0.md`
+- `autonomy-output/babel-handoff-protocol-v0.2.0.md`
+- `autonomy-output/babel-v0.2.0-changelog.md`
 
-1. Install timer/service:
+### v0.3.0 (architecture approved)
+Reference Parser Contract (RPC), Deterministic Test Harness (DTH), Agent
+Integration Pattern (AIP), human+AI collaboration bridge via
+`ext.human.intent`. Milestone execution: M0 RPC implementation, then M1
+parser conformance and M2 agent integration in parallel, then M3 human+AI
+workflow. Artifacts:
+- `autonomy-output/babel-milestones-v0.3.0.md`
+- `autonomy-output/babel-v0.3.0-changelog.md`
 
-```bash
-cd /root/ai-lab/Babel
-./automation/install_systemd.sh
-```
-
-2. Confirm timer:
-
-```bash
-systemctl list-timers --all | rg babel-autonomy
-```
-
-3. Check run logs:
-
-```bash
-journalctl -u babel-autonomy.service -n 100 --no-pager
-```
-
-## Change to 20 Minutes
-
-Edit [babel-autonomy.timer](/root/ai-lab/Babel/systemd/babel-autonomy.timer) and change:
-
-- `OnCalendar=*:0/5` -> `OnCalendar=*:0/20`
-
-Then reload:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl restart babel-autonomy.timer
-```
-
-## Manual Trigger
-
-```bash
-cd /root/ai-lab/Babel
-./automation/run_once.sh
-```
-
-## Main Configuration
-
-- [round_config.json](/root/ai-lab/Babel/orchestrator/round_config.json)
-- [active_task.txt](/root/ai-lab/Babel/prompts/active_task.txt)
+## Next Steps
+- Author the DTH golden file matrix in `autonomy-output/dth-golden-v0.3.0/`.
+- Generate `autonomy-output/babel-manifest-v0.2.0.json` with canonical
+  SHA-256 hashes of the four v0.2.0 artifacts.
+- Begin M0: implement the RPC in reference language (Python 3.11+).
+- Update the extension registry with a v0.3.0 milestone usage example.
