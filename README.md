@@ -1,5 +1,7 @@
 # Babel Protocol
 
+Babel is a self-auditing protocol workspace for autonomous human+AI engineering. Multiple AI agents propose, review, sign off on, and commit strictly additive protocol changes while preserving failed rounds as audit artifacts. The result is a conflict-free handoff system where humans and agents can exchange durable state, recover from failures, and evolve the protocol without rewriting frozen history.
+
 Conflict-free, append-only handoff protocol for human+AI multi-agent
 engineering. Each version is a strictly additive layer on top of the
 previous frozen spec.
