@@ -1,33 +1,26 @@
 {
   "$schema": "https://babel-protocol.org/schemas/v0.2.0/manifest.json",
-  "manifest_id": "babel-manifest-v0.5.1",
-  "manifest_version": "0.5.1",
-  "spec_version": "0.5.1",
-  "created_at": "2026-06-06T20:50:00Z",
-  "created_by": "minimadmax",
-  "basis": "frozen-v0.5.0",
-  "frozen_manifest_ref": "autonomy-output/babel-manifest-v0.5.0.json",
   "artifacts": [
     {
-      "path": "autonomy-output/babel-asmc-v0.5.1.md",
-      "kind": "spec-amendment",
       "amends": "autonomy-output/babel-asmc-v0.5.0.md",
-      "canonical_sha256": "sha256:PENDING_COMPUTE_AT_COMMIT"
+      "canonical_sha256": "sha256:1205952b78aadea900f484729ab937005291a464b62a370c03e1206ca31d04a8",
+      "kind": "spec-amendment",
+      "path": "autonomy-output/babel-asmc-v0.5.1.md"
     },
     {
-      "path": "autonomy-output/babel-tds-v0.5.1.md",
-      "kind": "spec-amendment",
       "amends": "autonomy-output/babel-tds-v0.5.0.md",
-      "canonical_sha256": "sha256:PENDING_COMPUTE_AT_COMMIT"
+      "canonical_sha256": "sha256:47dedce24605ad86abc9275af383c92752c11f42fc4824d0dfed368340cac7cd",
+      "kind": "spec-amendment",
+      "path": "autonomy-output/babel-tds-v0.5.1.md"
     },
     {
-      "path": "autonomy-output/babel-dtl-xrp-v0.5.1.md",
-      "kind": "spec-amendment",
       "amends": [
         "autonomy-output/babel-dtl-v0.5.0.md",
         "autonomy-output/babel-xrp-v0.5.0.md"
       ],
-      "canonical_sha256": "sha256:PENDING_COMPUTE_AT_COMMIT"
+      "canonical_sha256": "sha256:b09295946b9ab3b4a12d9f78d8288d75f30a335455e8cc279ad1d70861f8eca8",
+      "kind": "spec-amendment",
+      "path": "autonomy-output/babel-dtl-xrp-v0.5.1.md"
     }
   ],
   "audit_remediation": {
@@ -38,9 +31,16 @@
       "gap_4_ancestry_chain_forgery": "resolved by TDS v0.5.1 incremental index",
       "gap_5_isolated_agent_liveness": "resolved by ASMC v0.5.1 self-rollback"
     },
-    "nemotron_v0.5.1_verification": "passed, signoff granted",
-    "deepseek_v0.5.1_audit": "passed, signoff granted"
+    "deepseek_v0.5.1_audit": "passed, signoff granted",
+    "nemotron_v0.5.1_verification": "passed, signoff granted"
   },
+  "basis": "frozen-v0.5.0",
+  "created_at": "2026-06-06T20:50:00Z",
+  "created_by": "minimadmax",
   "execution_sequence_ref": "M0-v0.5.1",
-  "notes": "canonical_sha256 fields must be populated by the orchestrator pre-commit hook using v0.2.0 canonical serialization (NFC Unicode, lexicographic key sort by Unicode code point, deterministic number format, single LF terminator) before final commit write. The PENDING placeholder is a deliberate single-source-of-truth marker; the manifest is the last artifact written in the pre-commit sequence."
+  "frozen_manifest_ref": "autonomy-output/babel-manifest-v0.5.0.json",
+  "manifest_id": "babel-manifest-v0.5.1",
+  "manifest_version": "0.5.1",
+  "notes": "canonical_sha256 fields must be populated by the orchestrator pre-commit hook using v0.2.0 canonical serialization (NFC Unicode, lexicographic key sort by Unicode code point, deterministic number format, single LF terminator) before final commit write. The PENDING placeholder is a deliberate single-source-of-truth marker; the manifest is the last artifact written in the pre-commit sequence.",
+  "spec_version": "0.5.1"
 }
