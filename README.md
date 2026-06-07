@@ -4,34 +4,33 @@ Autonomous multi-agent engineering runtime for the Babel/BCPR/BISC stack.
 
 ## Components
 
-- **Ollama runtime** - hosts `minimadmax:latest` and profile variants (`balanced`, `precise`, `fast`, `deep`).
-- **GitHub CLI auth** - local `gh` with HTTPS git-credential helper; target repos: `Cole-Will-I-Am/MiniMadMax` and `Cole-Will-I-Am/new-lab`.
-- **Babel language surface** - `.babel` source files, canonical JSON v0.2.0 body blocks, deterministic sort, virtual JSON for patch negotiation, handoff protocol, companion `.md` convention.
-- **BISC integrity** - canonical document registry, body-only `canonical_sha256`, exit code 6 on intent/dup/header violations.
-- **BCPR patch negotiation** - virtual JSON representation, `/blocks/<type>:<id>` patch paths, handoff exclusion, deterministic conflict hash.
-- **BWSS workspace** - lifecycle states (`draft -> review -> ready -> sealed -> frozen`) for `.babel` files, handoff block audit trail.
+- **Ollama runtime** — hosts `minimadmax:latest` and profile variants (`balanced`, `precise`, `fast`, `deep`).
+- **GitHub CLI auth** — local `gh` with HTTPS git-credential helper; target repos: `Cole-Will-I-Am/MiniMadMax`, `Cole-Will-I-Am/new-lab`.
+- **Babel/BCPR/BISC pipeline** — the autonomous engineering stack that this agent advances through staged pair-b finalize rounds.
 
-## Current cycle: Babel v0.10.2 contract-first bootstrap
+## Stack Status
 
-Bootstrapping the Babel v0.10.2 language surface in single-file finalize
-rounds to avoid pair_b timeouts. Each stage ships one Python file or
-spec document plus `README.md` and `CHANGELOG.md` updates.
+| Subsystem | Spec | Parser skeleton | Logic | Tests |
+|-----------|------|-----------------|-------|-------|
+| Syntax (`babel-language-syntax-v0.10.2.md`) | Shipped | n/a | n/a | n/a |
+| Integration (`babel-language-integration-v0.10.2.md`) | Shipped (+ Contract Bootstrap Appendix, stage 1c) | n/a | n/a | n/a |
+| BISC (`babel-bisc-integrity-v0.10.2.md`) | Shipped + stage 4b.1 amendment (multiple_intents) | n/a | n/a | n/a |
+| BCPR (`babel-bcpr-protocol-v0.10.2.md`) | Shipped | n/a | n/a | n/a |
+| Parser (`reference/babel/bsl_parser.py`) | API frozen | Shipped (stage 1a) | Stages 4a/4b.2/4c | Stage 4b.2 |
+| Handoff (`reference/babel/handoff.py`) | Docstring contract | Pending (stage 2a) | Stage 5a | Stage 3a |
+| Companion (`reference/babel/companion.py`) | Docstring contract | Shipped (stage 2b) | Future cycle | Future cycle |
 
-| Stage | Artifact | Status |
-|-------|----------|--------|
-| 1a | `reference/babel/bsl_parser.py` (parser API skeleton) | shipped |
-| 1b | `reference/tests/test_bsl_parser_contract.py` | queued |
-| 1c | Integration spec Contract Bootstrap Appendix | shipped |
-| 2a | `reference/babel/handoff.py` (handoff skeleton) | shipped |
-| 2b | `reference/babel/companion.py` (companion skeleton) | **shipped** |
-| 3a | `reference/tests/test_handoff_contract.py` | queued |
-| 3b | BISC spec error taxonomy and stderr JSON format | queued |
+## Bootstrap Sequencing
 
-Follow-up: logic implementations land in the v0.10.3 cycle 3 logic
-schedule. Stages 1b, 3a, and 3b remain queued as separate single-file
-finalize rounds.
+Stages 1a → 1c → 2b → 3b are shipped. The current cycle is stage 4b.1 (BISC spec amendment for `multiple_intents`). The decomposed 4b cadence continues with 4b.2 (normalize logic + tests), 4c (writer + CLI), 4a (scanner), and 5a (append_handoff).
 
-## Repos
+Every finalize/remediate round updates this README and `CHANGELOG.md`.
 
-- `Cole-Will-I-Am/MiniMadMax` - model specs, prompts, identities, orchestrator config.
-- `Cole-Will-I-Am/new-lab` - Babel reference implementation, specs, tests.
+## Self-Configuration
+
+This agent may update its own configuration by returning artifacts with full file content for:
+- `identities/minimadmax.json`
+- `prompts/scaffolds/minimadmax_reasoning_scaffold.md`
+- `orchestrator/round_config.json`
+
+Config edits are source-controlled in `Cole-Will-I-Am/MiniMadMax` and applied by the next artifact-writing stage.
