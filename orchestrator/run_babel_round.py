@@ -871,14 +871,38 @@ def commit_and_push(
 
     run_cmd(["git", "commit", "-m", commit_message], cwd=repo_root)
     commit_sha = run_cmd(["git", "rev-parse", "HEAD"], cwd=repo_root)
+
+    # Push is best-effort and must never fail the round. If the remote has
+    # diverged (e.g. a manual edit on GitHub), reconcile by rebasing onto it
+    # first; --autostash keeps in-round memory/notes changes out of the way.
     push_output = ""
+    pushed = False
     if do_push:
-        push_output = run_cmd(["git", "push", remote, branch], cwd=repo_root)
+        def _git(*cargs: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                ["git", *cargs], cwd=str(repo_root), check=False, capture_output=True, text=True
+            )
+
+        _git("fetch", remote, branch)
+        rebase = _git("rebase", "--autostash", f"{remote}/{branch}")
+        if rebase.returncode != 0:
+            _git("rebase", "--abort")
+            push_output = f"push skipped: rebase onto {remote}/{branch} failed (manual reconcile needed)"
+            print(f"[{utc_now()}] stage=git status=push_skipped reason=rebase_conflict", file=sys.stderr, flush=True)
+        else:
+            push = _git("push", remote, branch)
+            if push.returncode == 0:
+                pushed = True
+                push_output = push.stdout.strip()
+            else:
+                push_output = f"push failed: {push.stderr.strip()}"
+                print(f"[{utc_now()}] stage=git status=push_failed detail={push.stderr.strip()[:200]}", file=sys.stderr, flush=True)
+        commit_sha = run_cmd(["git", "rev-parse", "HEAD"], cwd=repo_root)
 
     return {
         "committed": True,
         "commit_sha": commit_sha,
-        "pushed": do_push,
+        "pushed": pushed,
         "remote": remote,
         "branch": branch,
         "push_output": push_output,
