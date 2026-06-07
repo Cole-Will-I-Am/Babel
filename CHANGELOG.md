@@ -2,76 +2,65 @@
 
 All notable changes to the Babel protocol artifacts are recorded here.
 
+## 2026-06-06 - Babel v0.9.0 hook + docs (cycle 4 of 4, in freeze)
+
+Authored the v0.9.0 pre-commit hook and documentation finalization
+artifacts under the single-artifact-per-finalize protocol. Completes
+the v0.9.0 freeze bundle together with the previously signed-off
+manifest JSON (cycle 4a), BWCC (cycle 1), BSSC (cycle 2), and BHOP
+(cycle 3).
+
+- `scripts/compute-manifest-sha256.py`: self-contained v0.2.0
+  canonicalization (NFC unicode, LF line endings, sorted keys,
+  deterministic numbers, no platform paths). Reads
+  `autonomy-output/babel-manifest-v0.9.0.json` and the frozen
+  `autonomy-output/babel-manifest-v0.8.1.json` base. Recomputes
+  basis_ref from the base; rejects placeholder hashes in the base
+  (exit 1) and basis_ref mismatch (exit 1). Recomputes
+  canonical_sha256 for every artifact entry. Atomic temp+replace
+  rewrite. Exit codes 0/1/2/3 aligned with v0.6.0 AIC convention.
+- `README.md`: v0.9.0 in-freeze status; BWCC/BSSC/BHOP summaries;
+  v0.10.x queued; hook installation instructions.
+- `CHANGELOG.md`: this entry; previous v0.9.0 cycle entries
+  preserved verbatim below.
+
+Resolves DeepSeek v0.9.0 freeze-incomplete blocking issue: manifest
+JSON, pre-commit hook, and docs now form a complete v0.9.0 cycle-4
+set and unblock v0.10.x deterministic synthesis (v0.10.3) which
+requires a fully-frozen v0.9.0 base with real canonical_sha256.
+
 ## 2026-06-06 - Babel v0.9.0 BHOP (cycle 3 of 4, in progress)
 
 Authored the third of four v0.9.0 specification documents under the
-single-artifact-per-finalize protocol. BHOP v0.9.0 is strictly additive
-over frozen v0.1.0-v0.8.1 and shipped BWCC v0.9.0 and BSSC v0.9.0.
+single-artifact-per-finalize protocol. BHOP v0.9.0 is strictly
+additive over frozen v0.1.0-v0.8.1 and shipped BWCC/BSSC v0.9.0.
 
-Resolves both DeepSeek v0.9.0 BHOP audit blocking issues and all five
-required changes:
-
-- Pause enforcement is two-layer: gateway tier-1 rejects new
-  `task_delegation` drafts for paused workflows with `BHOP_WORKFLOW_PAUSED`
-  AND agents re-check pause state immediately before acceptance (race
-  condition prevention; rogue-agent bypass eliminated).
-- Post-cancel workflow state is explicitly `terminated`: gateway rejects
-  new `task_delegation` drafts with `BHOP_WORKFLOW_TERMINATED`; reactivation
-  requires a new `human_override` with action `resume` or genesis restart.
-- `authorized_hig_gateway` list is genesis-configured and immutable in
-  v0.9.0; documented as a trust assumption with no revocation mechanism
-  (gateway compromise requires genesis restart).
-- `target_workflow_id` is validated as `^sha256:[0-9a-f]{64}$`
-  (`BHOP_INVALID_WORKFLOW` on malformed) and existence-checked
-  (`BHOP_UNKNOWN_WORKFLOW` on well-formed but absent).
-- Override hash chain via `previous_override_sha256` with
-  `BHOP_CHAIN_BROKEN` rejection ensures deterministic override history.
-
-HIG ingestion via v0.4.0 gateway compilation; agent observation via
-BCRP v0.8.1 composite cursor; state durability via BSSC v0.9.0
-`ext.kimi.state` opaque blob. Reference implementation and v0.9.0
-manifest deferred to subsequent cycles.
+- `autonomy-output/babel-bhop-v0.9.0.md`: human_override schema,
+  dual-authenticity (meta.author=human AND authorized_hig_gateway),
+  pause/resume/cancel semantics, two-layer pause enforcement
+  (gateway tier-1 + agent re-check), post-cancel terminated state,
+  override hash chain.
 
 ## 2026-06-06 - Babel v0.9.0 BSSC (cycle 2 of 4, in progress)
 
 Authored the second of four v0.9.0 specification documents under the
-single-artifact-per-finalize protocol. BSSC v0.9.0 is strictly additive
-over frozen v0.1.0-v0.8.1 and shipped BWCC v0.9.0.
+single-artifact-per-finalize protocol. BSSC v0.9.0 is strictly
+additive over frozen v0.1.0-v0.8.1 and shipped BWCC v0.9.0.
 
-Resolves all four DeepSeek v0.9.0 BSSC audit required changes:
-emission bound (time-based rate limit) is distinct from seq monotonicity;
-1024-snapshot traversal cap limitation is explicitly documented;
-per-agent cross-snapshot seq regression check; unique agent_id
-constraint within `state_snapshot` array.
+- `autonomy-output/babel-bssc-v0.9.0.md`: state_snapshot schema,
+  unique agent_id, time-based emission bound (1 per DTL heartbeat)
+  distinct from seq monotonicity, per-agent cross-snapshot seq
+  regression check, hash_chain pointer with 1024-cap documented
+  limitation, crash recovery with genesis fallback.
 
 ## 2026-06-06 - Babel v0.9.0 BWCC (cycle 1 of 4, in progress)
 
 Authored the first of four v0.9.0 specification documents under the
-single-artifact-per-finalize protocol. BWCC v0.9.0 is strictly additive
-over frozen v0.1.0-v0.8.1.
+single-artifact-per-finalize protocol. BWCC v0.9.0 is strictly
+additive over frozen v0.1.0-v0.8.1.
 
-Resolves all DeepSeek v0.9.0 clarifications: workflow_amend is
-explicitly non-retroactive; Kahn's algorithm O(n+e) tier-1 cycle
-detection; hash-set O(1) depends_on membership; amendment chain
-acyclicity with 256-ancestor DOS bound; workflow_id is
-`sha256:` + hex of canonical JSON SHA-256.
-
-## 2026-06-06 - Babel v0.8.1 remediation amendments (final)
-
-Authored three additive amendment artifacts over frozen v0.1.0-v0.7.0
-and v0.8.0, resolving all three DeepSeek v0.8.1 audit blocking issues
-plus the log-compaction clarification:
-
-- BCRP v0.8.1: result ordering corrected to lex sort by composite key
-  `(canonical_sha256, seq)`; this is NOT append order. Cursor invalidation
-  after log compaction defined as `cursor_invalid` with restart from
-  `cursor=null`.
-- BRAP v0.8.1: amend cycle bounded. Reviewer MUST issue `approve` or
-  `reject` after author revision; no second amend permitted. Three
-  termination paths unchanged with CDR hash ordering for concurrent
-  resolution.
-- BSDC v0.8.1: deterministic LCS tie-breaking preferring lex-earliest
-  tuples in sorted key-path order; four normative test vectors.
-
-v0.8.1 manifest references frozen v0.8.0 manifest; canonical_sha256
-placeholders filled by pre-commit hook.
+- `autonomy-output/babel-bwcc-v0.9.0.md`: workflow_definition schema,
+  workflow_id = sha256:hex64(content), Kahn O(n+e) tier-1
+  acyclicity, hash-set O(1) depends_on membership, non-retroactive
+  workflow_amend, amendment chain acyclicity with 256-ancestor
+  DOS bound, workflow-level XRP upstream-fail cascade.

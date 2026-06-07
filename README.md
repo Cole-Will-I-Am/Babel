@@ -1,58 +1,73 @@
 # Babel Protocol
 
-Babel is a self-auditing protocol workspace for autonomous human+AI engineering. Multiple AI agents propose, review, sign off on, and commit strictly additive protocol changes while preserving failed rounds as audit artifacts. The result is a conflict-free handoff system where humans and agents can exchange durable state, recover from failures, and evolve the protocol without rewriting frozen history.
-
 Conflict-free, append-only handoff protocol for human+AI multi-agent
 engineering. Each version is a strictly additive layer on top of the
 previous frozen spec.
 
 ## Status
 
-| Version | State        | Description                                                                        |
-|---------|--------------|------------------------------------------------------------------------------------|
-| v0.1.0  | frozen       | Core schema: operation_type, ext registry, canonical JSON                          |
-| v0.2.0  | frozen       | Canonical serialization: NFC, sorted keys, deterministic numbers, single LF        |
-| v0.3.0  | frozen       | M0 RPC + parser conformance + agent integration milestone architecture            |
-| v0.4.0  | frozen       | CDR deterministic ordering, DTL heartbeats, M0 prerequisite sequencing            |
-| v0.5.1  | frozen       | ASMC heartbeat exemption, TDS deadline rejection, XRP proxy_proof cascade          |
-| v0.6.0  | frozen       | BSS grammar, AIC CLI (babel-emit/validate/hash), HIG atomic inbox/processing       |
-| v0.7.0  | frozen       | TIC packaging, WCP gitignore, ITP golden tests with crash handling                |
-| v0.8.1  | frozen       | BCRP composite cursor, BRAP bounded amend cycle, BSDC LCS tie-breaking            |
-| v0.9.0  | in progress  | BWCC (shipped), BSSC (shipped), BHOP (shipped), manifest (pending)                 |
+| Version      | State     | Description                                                                        |
+|--------------|-----------|------------------------------------------------------------------------------------|
+| v0.1.0-v0.8.1| frozen    | BSS, AIC, HIG, TIC, WCP, ITP, BCRP, BRAP, BSDC layers shipped and immutable.        |
+| v0.9.0       | in freeze | BWCC (workflow envelope), BSSC (state snapshots), BHOP (human override) shipped.   |
+| v0.10.x      | queued    | BWSS, BISC, BCPR specs atop deterministic synthesis (v0.10.3).                     |
 
-## v0.9.0 Layers
+## Process
 
-- **BWCC v0.9.0** (shipped): Static workflow envelope, Kahn O(n+e) acyclicity,
-  non-retroactive workflow_amend, upstream-fail XRP cascade.
-- **BSSC v0.9.0** (shipped): State snapshot continuity, hash chain with
-  1024-cap recovery, unique agent_id, distinct emission bound vs seq
-  monotonicity, cross-snapshot seq regression check.
-- **BHOP v0.9.0** (shipped): Human override protocol with dual-authenticity
-  (meta.author=human + authorized_hig_gateway), gateway+agent two-layer pause
-  enforcement, explicit post-cancel terminated state, override hash chain,
-  BCRP-based agent observation, BSSC state durability for override observation.
-- **v0.9.0 manifest** (pending): Pre-commit hook will compute canonical SHA-256
-  of all three specs and atomically rewrite manifest before commit.
+- Single-artifact-per-finalize protocol: each pair_b_finalize cycle ships one
+  internally consistent artifact (or one tightly coupled freeze bundle such as
+  hook + docs).
+- Pre-commit hook `scripts/compute-manifest-sha256.py` finalizes manifest hashes
+  via v0.2.0 canonicalization (NFC + LF + sorted keys + deterministic numbers).
+- v0.10.3 deterministic synthesis: procedural artifacts (manifest, hook, README,
+  CHANGELOG) are generated from a spec-index and verified by checksum.
 
-## Single-Artifact-per-Finalize
+## v0.9.0 freeze
 
-v0.9.0 materializes under a single-artifact-per-finalize protocol: each
-`pair_b_finalize` cycle ships one internally consistent spec (or
-implementation) plus README/CHANGELOG updates. This bounds model output
-size and ensures every cycle is reviewable and mergeable in isolation.
-Frozen v0.1.0-v0.8.1 layers remain unchanged.
+- `autonomy-output/babel-bwcc-v0.9.0.md`: static workflow envelope; Kahn O(n+e)
+  tier-1 acyclicity; hash-set O(1) depends_on membership; non-retroactive
+  workflow_amend; amendment chain acyclicity with 256-ancestor DOS bound;
+  workflow-level XRP upstream-fail cascade.
+- `autonomy-output/babel-bssc-v0.9.0.md`: state_snapshot schema; unique
+  agent_id; time-based emission bound (1 per DTL heartbeat) distinct from seq
+  monotonicity; per-agent cross-snapshot seq regression check; hash_chain
+  pointer with 1024-cap documented limitation; crash recovery with genesis
+  fallback.
+- `autonomy-output/babel-bhop-v0.9.0.md`: human_override schema; dual
+  authenticity (meta.author=human AND authorized_hig_gateway); two-layer
+  pause enforcement (gateway tier-1 + agent re-check); explicit post-cancel
+  terminated state; override hash chain.
+- `autonomy-output/babel-manifest-v0.9.0.json`: artifact inventory; basis_ref
+  to frozen v0.8.1 manifest; canonical_sha256 populated by pre-commit hook.
+- `scripts/compute-manifest-sha256.py`: self-contained v0.2.0 canonicalization;
+  basis_ref validation; placeholder rejection; atomic temp+replace rewrite.
+
+## v0.10.x (queued)
+
+- BWSS v0.10.2: workflow submission envelope; bwss_to_json; deterministic error
+  schema; workflow_id SHA-256 preservation.
+- BISC v0.10.2: intra-doc duplicate rejection; cross-log update semantics;
+  CDR v0.4.0 hash-ordering tie-breaker; blob_sha256 via v0.2.0.
+- BCPR v0.10.2: Pair-B-precedence reconciliation; escalation_provisional
+  state; failed-state transition after second escalation.
+- v0.10.3 deterministic synthesis: spec-index as sole hand-authored inventory;
+  manifest/hook/README/CHANGELOG generated by template + v0.2.0 canonicalization;
+  checksum-only verification with spec-index Pair B audit.
+
+## v0.9.0 hook installation (human operator)
+
+The pre-commit hook is shipped in the repo but is not auto-installed. Operator
+must run, once per clone:
+
+```
+cp scripts/compute-manifest-sha256.py .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+```
+
+The hook computes the v0.9.0 manifest hashes on commit and rejects the
+commit if the frozen v0.8.1 base has any placeholder hashes or if basis_ref
+does not match the recomputed value.
 
 ## License
 
-Apache-2.0.
-
-## Frozen invariants
-
-- Canonical serialization: NFC, sorted keys, deterministic numbers,
-  single LF (v0.2.0, frozen).
-- Handoff log: append-only, atomic temp+rename, lex-greatest
-  filename fork resolution (v0.2.0, frozen).
-- operation_type enum: six values, conditional rollback_to (v0.1.0,
-  frozen).
-- AIC CLI exit codes: 0,1,2,3 only (v0.6.0, frozen).
-- ITP exit codes: 0,10,20 only, disjoint from AIC codes (v0.7.0).
+Apache-2.0
