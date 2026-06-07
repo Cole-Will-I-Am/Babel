@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -930,6 +931,45 @@ def load_identity_map(config: dict[str, Any], repo_root: Path) -> dict[str, dict
     return out
 
 
+def run_reference_suite(repo_root: Path, timeout_sec: int = 180) -> tuple[bool, str]:
+    """Byte-compile every reference/*.py and run the reference unittest suite.
+
+    Returns (ok, output_tail). Catches truncated/non-importable modules (via
+    py_compile) and behavioral failures (via unittest).
+    """
+    ref_dir = repo_root / "reference"
+    if not ref_dir.exists():
+        return True, "no reference/ dir"
+    compile_errs: list[str] = []
+    for pyf in sorted(ref_dir.rglob("*.py")):
+        rel = str(pyf.relative_to(repo_root))
+        proc = subprocess.run(
+            [sys.executable, "-m", "py_compile", rel],
+            cwd=str(repo_root), check=False, capture_output=True, text=True,
+        )
+        if proc.returncode != 0:
+            last = proc.stderr.strip().splitlines()[-1] if proc.stderr.strip() else "compile error"
+            compile_errs.append(f"{rel}: {last}")
+    if compile_errs:
+        return False, "py_compile failures:\n" + "\n".join(compile_errs[:20])
+    tests_dir = ref_dir / "tests"
+    if not tests_dir.exists() or not any(tests_dir.glob("test_*.py")):
+        return True, "compiled OK; no tests"
+    env = dict(os.environ)
+    extra = f"{repo_root}{os.pathsep}{repo_root / 'reference'}"
+    env["PYTHONPATH"] = extra + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "unittest", "discover", "-s", "reference/tests", "-p", "test_*.py"],
+            cwd=str(repo_root), check=False, capture_output=True, text=True, env=env, timeout=timeout_sec,
+        )
+    except subprocess.TimeoutExpired:
+        return False, "unittest timed out"
+    out = ((proc.stdout or "") + (proc.stderr or "")).strip()
+    tail = "\n".join(out.splitlines()[-40:])
+    return proc.returncode == 0, tail
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run a fully autonomous Babel round.")
     parser.add_argument("--task", required=True, help="Top-level task for this autonomous run.")
@@ -1246,6 +1286,67 @@ def main() -> int:
                     print(f"[{utc_now()}] stage=implement status=wrote files={len(code_files)}", file=sys.stderr, flush=True)
                 else:
                     print(f"[{utc_now()}] stage=implement status=no_reference_artifacts", file=sys.stderr, flush=True)
+
+                # Verify-and-repair: actually RUN the reference suite (py_compile +
+                # unittest) and feed failures back to the coder for bounded repair
+                # passes. Runs the whole suite, so it also heals pre-existing
+                # broken/truncated files. Still non-fatal to the spec commit.
+                verify_loops = max(0, int(config.get("implement_verify_loops", 2)))
+                ok, report = run_reference_suite(repo_root)
+                fix_attempt = 0
+                while not ok and fix_attempt < verify_loops:
+                    fix_attempt += 1
+                    print(f"[{utc_now()}] stage=implement status=verify_failed attempt={fix_attempt}", file=sys.stderr, flush=True)
+                    cur_blocks: list[str] = []
+                    cbudget = 40000
+                    for pyf in sorted((repo_root / "reference").rglob("*.py")):
+                        rel = str(pyf.relative_to(repo_root))
+                        try:
+                            content = pyf.read_text(encoding="utf-8")
+                        except OSError:
+                            continue
+                        block = f"\n=== FILE: {rel} ===\n{content}\n"
+                        if cbudget - len(block) < 0:
+                            continue
+                        cur_blocks.append(block)
+                        cbudget -= len(block)
+                    fix_task = (
+                        "The Babel reference test suite is FAILING. Return corrected, COMPLETE "
+                        "file content as artifacts under reference/ for every file that must change "
+                        "so that `python -m unittest` passes. Never truncate a file. Keep "
+                        "babel/__init__.py exports consistent with the modules.\n\n"
+                        f"=== TEST OUTPUT ===\n{report}\n"
+                        f"=== CURRENT REFERENCE FILES ==={''.join(cur_blocks)}"
+                    )
+                    fixer = call_agent(
+                        stage=f"implement_fix_{fix_attempt}",
+                        task=fix_task,
+                        next_owner="git",
+                        identity=identity_map[implementer_id],
+                        incoming=[],
+                        ollama_url=ollama_url,
+                        request_options=request_options,
+                        shared_log=shared_log,
+                        max_recent_events=max_recent_events,
+                        round_id=round_id,
+                        repo_root=repo_root,
+                        char_limits=char_limits,
+                        scaffold_max_chars=scaffold_max_chars,
+                        model_timeout_sec=model_timeout_sec,
+                        model_max_retries=model_max_retries,
+                        model_retry_backoff_sec=model_retry_backoff_sec,
+                    )
+                    fix_arts = [
+                        a for a in (fixer.get("artifacts") or [])
+                        if isinstance(a, dict) and str(a.get("path", "")).startswith("reference/")
+                    ]
+                    if not fix_arts:
+                        print(f"[{utc_now()}] stage=implement_fix_{fix_attempt} status=no_fix_artifacts", file=sys.stderr, flush=True)
+                        break
+                    fixed_files = write_artifacts(repo_root, fix_arts)
+                    files_to_commit = list(dict.fromkeys(files_to_commit + fixed_files))
+                    ok, report = run_reference_suite(repo_root)
+                print(f"[{utc_now()}] stage=implement status=verify_{'pass' if ok else 'fail'} attempts={fix_attempt}", file=sys.stderr, flush=True)
             except Exception as exc:  # noqa: BLE001 - never block the spec commit
                 print(f"[{utc_now()}] stage=implement status=error error={type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
     else:

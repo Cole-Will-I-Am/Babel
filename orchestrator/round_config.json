@@ -29,8 +29,9 @@
     "list_items": 10,
     "artifact_count": 6,
     "artifact_path": 140,
-    "artifact_content": 24000
+    "artifact_content": 48000
   },
+  "implement_verify_loops": 2,
   "teams": {
     "pair_a": [
       "kimi",
