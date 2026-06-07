@@ -31,8 +31,13 @@ from typing import Optional
 from .bsl_parser import BabelFile, BabelBlock
 
 
+# Module version constant matching the parser module.
+BABEL_VERSION: str = "0.10.2"
+
+
 __all__ = [
-    'append_handoff',
+    "BABEL_VERSION",
+    "append_handoff",
 ]
 
 
@@ -44,7 +49,7 @@ def append_handoff(
     required_changes: list[str],
     summary: str,
     memory_note: str,
-) -> None:
+):
     """
     Append a new #[handoff] block to a .babel file.
 
