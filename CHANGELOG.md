@@ -1,85 +1,47 @@
 # Changelog
 
-All notable changes to the Babel protocol artifacts are recorded here.
-New entries are strictly additive; frozen entries are preserved verbatim.
+All notable changes to MiniMadMax and the Babel stack are recorded here.
 
-## 2026-06-07 - Babel v0.10.3 bootstrap (cycle 1 of 7, in progress)
+## v0.10.2 - Babel Language Surface (Unreleased)
 
-Authored the first of seven v0.10.3 specification documents under the
-single-artifact-per-finalize protocol. The bootstrap spec is strictly
-additive over the v0.9.0 freeze (BWCC, BSSC, BHOP) and all frozen
-v0.1.0-v0.8.1 artifacts. It defines the recursive basis_ref traversal
-procedure from the v0.9.0 manifest back to the v0.1.0 genesis
-manifest, the hash aggregation rule (one spec-index seed tuple per
-artifact entry), the gap detection gates (BOOTSTRAP_MISSING_MANIFEST,
-BOOTSTRAP_PLACEHOLDER_HASH, BOOTSTRAP_INVALID_BASIS_REF,
-BOOTSTRAP_BASIS_MISMATCH, BOOTSTRAP_GENESIS_HAS_BASIS,
-BOOTSTRAP_BAD_PATH, BOOTSTRAP_DUPLICATE_KEY), and the output JSON
-format consumed by the v0.10.3 spec-index author in cycle 6.
+### Cycle: Stage 1c - Contract Bootstrap Appendix
 
-The composite unique constraint on (version, type) is enforced as a
-hard schema rule, not a tie-breaker. The manifest-specific error code
-SPECINDEX_MANIFEST_DUPLICATE is delegated to the v0.10.3 spec-index
-validator. Cycle 7 synthesis paths are now frozen: v0.9.0 README/
-CHANGELOG at repo root; v0.10.2 manifest at autonomy-output/babel-
-manifest-v0.10.2.json; hook at scripts/compute-manifest-sha256.py;
-v0.10.2 README/CHANGELOG at repo root. validate-spec-index.py is
-assigned to cycle 6 alongside spec-index authoring (exit codes 0/1/2/3/4
-explicit; exclusion list for .git/, __pycache__/, *.pyc, *.swp,
-.DS_Store, *.local.json). v0.10.2 BWSS/BISC/BCPR normative specs are
-decoupled from the template registry: BWSS may begin once bootstrap
-(cycle 1) signs off; template registry signoff is not a precondition.
+Shipped the Contract Bootstrap Appendix appended to `autonomy-output/babel-language-integration-v0.10.2.md`. The appendix maps the six shipped and pending API functions to BWSS lifecycle states and handoff protocol steps.
 
-## 2026-06-06 - Babel v0.9.0 hook + docs (cycle 4 of 4, in freeze)
+#### Added
 
-Authored the v0.9.0 pre-commit hook and documentation finalization
-artifacts under the single-artifact-per-finalize protocol. Completes
-the v0.9.0 freeze. The hook recomputes basis_ref from the frozen v0.8.1
-manifest via v0.2.0 canonicalization, rejects any placeholder or
-empty canonical_sha256 in the base manifest, recomputes
-canonical_sha256 for every artifact entry, and atomically rewrites
-the manifest before commit. Exit codes: 0=ok, 1=validation failure,
-2=missing file, 3=IO error. README and CHANGELOG updated to reflect
-the v0.9.0 freeze; v0.10.x deterministic synthesis is unblocked.
+- **A.1 API Surface table** listing `parse_file`, `write_file`, `to_virtual_json`, `companion_path` (stage 1a shipped) and `append_handoff`, `resolve_companion` (stages 2a/2b pending), with `NotImplementedError` status noted for all six.
+- **A.2 Lifecycle state mapping** as a state-by-function table covering `draft`, `review`, `ready`, `sealed`, `frozen`. Notable rules: `write_file` valid only in `draft`/`review`; `append_handoff` valid only in `ready`/`sealed`; read-only functions valid in every state.
+- **A.3 Handoff protocol step mapping** naming the API function that participates in each of the five ordered steps: read current state, extract handoff history, locate companion prose, append new handoff, persist.
+- **A.4 Stub status and frozen surface** documenting the shipped and frozen dataclasses, error taxonomy, and module constants from stage 1a, and confirming that logic cycles are scheduled for v0.10.3 cycles 2 and 3.
+- **A.5 Contract test coverage** pointer to stage 1b (parser contract test) and stage 3a (handoff contract test).
 
-## 2026-06-06 - Babel v0.9.0 BHOP (cycle 3 of 4, in progress)
+#### Notes
 
-Authored the third of four v0.9.0 specification documents under the
-single-artifact-per-finalize protocol. BHOP v0.9.0 is strictly additive
-over frozen v0.1.0-v0.8.1 and shipped BWCC v0.9.0 and BSSC v0.9.0.
-Defines a deterministic runtime human intervention protocol with
-dual-authenticity (meta.author=human AND authorized_hig_gateway),
-gateway+agent two-layer pause enforcement, explicit post-cancel
-terminated state, target_workflow_id sha256:hex64 validation, override
-hash chain, HIG ingestion, and BCRP-based agent observation.
+- This stage is spec-only; no code changes.
+- Single-file-per-stage cadence preserved; the appendix is part of the existing integration spec file, not a new file.
+- Stages 2a, 2b, 3a, and 3b remain queued as separate single-file finalize rounds.
 
-## 2026-06-06 - Babel v0.9.0 BSSC (cycle 2 of 4, in progress)
+### Cycle: Stage 1b - Parser Contract Test (Previously Shipped)
 
-Authored the second of four v0.9.0 specification documents under the
-single-artifact-per-finalize protocol. BSSC v0.9.0 is strictly additive
-over frozen v0.1.0-v0.8.1 and shipped BWCC v0.9.0. Defines a
-deterministic checkpoint protocol with state_snapshot schema, unique
-agent_id, time-based emission bound (distinct from seq monotonicity),
-per-agent cross-snapshot seq regression check, hash_chain pointer with
-explicitly documented 1024-cap limitation, and crash recovery with
-genesis fallback.
+Shipped `reference/tests/test_bsl_parser_contract.py` verifying the frozen public surface of `reference.babel.bsl_parser`: module constants, AST dataclasses, error taxonomy, public function signatures, and `NotImplementedError` raises on all four shipped functions. Signed off by deepseek and committed.
 
-## 2026-06-06 - Babel v0.9.0 BWCC (cycle 1 of 4, in progress)
+### Cycle: Stage 1a - Parser API Skeleton (Previously Shipped)
 
-Authored the first of four v0.9.0 specification documents under the
-single-artifact-per-finalize protocol. BWCC v0.9.0 is strictly additive
-over frozen v0.1.0-v0.8.1. Defines a static workflow envelope with
-content-addressed workflow_id (sha256:hex64 via v0.2.0), Kahn O(n+e)
-tier-1 acyclicity, hash-set O(1) depends_on membership, non-retroactive
-workflow_amend, amendment chain acyclicity with 256-ancestor DOS bound,
-and XRP upstream-fail cascade propagation.
+Shipped the contract-first bootstrap for the Babel v0.10.2 reference parser as a single-file deliverable. `reference/babel/bsl_parser.py` exposes the frozen public API (`parse_file`, `write_file`, `to_virtual_json`, `companion_path`), the AST dataclasses (`BabelBlock`, `BabelFile`), the stable error taxonomy (`BabelParseError` with five codes mapping to BISC exit code 6), and the module constants (`BABEL_VERSION`, `BLOCK_TYPES`, `BODY_TYPES`, `HANDOFF_TYPE`, `TYPE_ENUM_RANK`). All function bodies raise `NotImplementedError`. Signed off by deepseek and committed.
 
-## 2026-06-06 - Babel v0.8.1 freeze (complete)
+### Earlier (Previously Shipped)
 
-Shipped BCRP v0.8.1 (corrected lex sort by (sha256, seq), cursor
-invalidation and restart after compaction), BRAP v0.8.1 (amend cycle
-bounded: reviewer approves or rejects after author revision; CDR
-ordering preserved), BSDC v0.8.1 (deterministic LCS tie-break
-preferring earlier sorted tuples; four test vectors), and the v0.8.1
-manifest referencing the frozen v0.8.0 base. All three DeepSeek v0.8.1
-audit blocking issues resolved.
+- **Syntax spec** `autonomy-output/babel-language-syntax-v0.10.2.md` - EBNF grammar, body/handoff split, header semantics, deterministic serialization.
+- **Integration spec** `autonomy-output/babel-language-integration-v0.10.2.md` - subsystem mapping, lifecycle, companion `.md` convention, handoff protocol (now with Contract Bootstrap Appendix appended in stage 1c).
+- **BISC amendment** `autonomy-output/babel-bisc-integrity-v0.10.2.md` - `.babel` recognition, intent validation, duplicate rejection, body-only `canonical_sha256`, exit code 6.
+- **BCPR amendment** `autonomy-output/babel-bcpr-v0.10.2.md` - virtual JSON, `/blocks/<type>:<id>` patch paths, handoff exclusion.
+
+## v0.10.2 Bootstrap Plan (Forward Look)
+
+- Stage 2a: `reference/babel/handoff.py` skeleton with `append_handoff` raising `NotImplementedError`.
+- Stage 2b: `reference/babel/companion.py` skeleton with `resolve_companion` raising `NotImplementedError`.
+- Stage 3a: `reference/tests/test_handoff_contract.py` mirroring the stage 1b contract test pattern.
+- Stage 3b: BISC integrity spec amendment covering the parser error taxonomy and structured stderr JSON format.
+- v0.10.3 cycle 2: logic cycle for the four shipped parser functions.
+- v0.10.3 cycle 3: logic cycle for `append_handoff` and `resolve_companion`.

@@ -1,60 +1,51 @@
-# Babel Protocol
+# MiniMadMax
 
-Conflict-free, append-only handoff protocol for human+AI multi-agent
-engineering. Each version is a strictly additive layer on top of the
-previous frozen spec.
+Autonomous multi-agent engineering runtime for the Babel/BCPR/BISC stack.
 
-## Status
+## Components
 
-| Version      | State        | Description                                                                  |
-| ------------ | ------------ | ---------------------------------------------------------------------------- |
-| v0.1.0-v0.8.1 | Frozen       | Prior protocol layers; immutable.                                            |
-| v0.9.0       | Frozen       | BWCC, BSSC, BHOP specs and manifest. Pre-commit hook finalizes manifest hashes. |
-| v0.10.0      | Frozen       | Reserved.                                                                    |
-| v0.10.1      | Frozen       | Reserved.                                                                    |
-| v0.10.2      | In progress  | BWSS, BISC, BCPR specs queued; procedural synthesis follows template registry. |
-| v0.10.3      | In progress  | Bootstrap spec shipped (cycle 1/7); template registry, BWSS, BISC, BCPR, spec-index, synthesis follow. |
+- **Ollama runtime** - hosts `minimadmax:latest` and profile variants (`balanced`, `precise`, `fast`, `deep`).
+- **GitHub CLI auth** - local `gh` with HTTPS git-credential helper; target repos: `Cole-Will-I-Am/MiniMadMax`, `Cole-Will-I-Am/new-lab`.
+- **Babel reference** - `reference/babel/` (parser, handoff, companion) and `reference/tests/` (contract tests).
+- **Babel specs** - `autonomy-output/` (syntax, integration, BISC, BCPR amendments).
 
-## Current Cycle
+## Babel v0.10.2 Contract-First Bootstrap
 
-v0.10.3 cycle 1 of 7: bootstrap spec shipped. The recursive
-basis_ref traversal procedure is now defined for aggregating v0.1.0-
-v0.9.0 canonical_sha256 into the v0.10.3 spec-index. Cycle 2 (template
-registry), cycles 3-5 (BWSS/BISC/BCPR), cycle 6 (spec-index +
-validate-spec-index.py), and cycle 7 (procedural synthesis) follow
-under the single-artifact-per-finalize protocol.
+The Babel v0.10.2 reference implementation is being shipped in a single-file-per-stage cadence to avoid the multi-file stage timeouts that affected earlier pair cycles. Each stage delivers exactly one artifact and is independently revertible.
 
-## v0.9.0 Freeze
+### Bootstrap Sequencing
 
-Complete. BWCC (static workflow envelope, non-retroactive amend, Kahn
-acyclicity), BSSC (state snapshots, unique agent_id, 1024-cap
-recovery), BHOP (dual-auth human_override, two-layer pause, post-cancel
-terminated state). Pre-commit hook `scripts/compute-manifest-sha256.py`
-enforces basis_ref validation, rejects placeholder base, and atomically
-rewrites manifest hashes via v0.2.0 canonicalization. The v0.9.0 base
-is the foundation for v0.10.x deterministic synthesis.
+| Stage | Artifact                                                             | Status         |
+|-------|----------------------------------------------------------------------|----------------|
+| 1a    | `reference/babel/bsl_parser.py` (parser API skeleton)                | shipped        |
+| 1b    | `reference/tests/test_bsl_parser_contract.py` (parser contract test) | shipped        |
+| 1c    | `autonomy-output/babel-language-integration-v0.10.2.md` (Contract Bootstrap Appendix) | shipped        |
+| 2a    | `reference/babel/handoff.py` (handoff skeleton)                      | pending        |
+| 2b    | `reference/babel/companion.py` (companion skeleton)                  | pending        |
+| 3a    | `reference/tests/test_handoff_contract.py` (handoff contract test)  | pending        |
+| 3b    | `autonomy-output/babel-bisc-integrity-v0.10.2.md` (BISC error taxonomy amendment) | pending |
 
-## v0.10.x Roadmap
+Stages 1a and 1b are signed off. Stage 1c (this round) ships the Contract Bootstrap Appendix that maps the shipped and pending API surface to BWSS lifecycle states and handoff protocol steps. Stages 2a, 2b, 3a, and 3b are queued as separate single-file finalize rounds.
 
-  - v0.10.2 BWSS: workflow submission service (grammar, compilation,
-    edge-case test vectors).
-  - v0.10.2 BISC: build/integration state continuity (task_commit,
-    cross-log update semantics, CDR v0.4.0 hash tie-break).
-  - v0.10.2 BCPR: build/ci pull-request protocol (escalation docs,
-    Pair-B precedence, failed-state transition).
-  - v0.10.3: bootstrap procedure (shipped), template registry, spec-
-    index with composite unique constraint, validate-spec-index.py
-    bidirectional gate, procedural synthesis of v0.9.0 and v0.10.2
-    README/CHANGELOG via template registry.
+### Stage 1c Details
 
-## Operational Notes
+The Contract Bootstrap Appendix appears at the end of `autonomy-output/babel-language-integration-v0.10.2.md` and covers:
 
-  - Single-artifact-per-finalize: each cycle ships one normative spec
-    or one procedural batch, never a mix of unrelated edits.
-  - All artifacts are strictly additive. Frozen fields are never
-    mutated.
-  - Canonical JSON serialization follows v0.2.0: NFC, LF, sorted keys,
-    deterministic numbers.
-  - Manifests chain via basis_ref; the pre-commit hook recomputes and
-    validates the chain on every commit.
-  - See CHANGELOG.md for per-cycle history.
+- A.1 API surface table for the six shipped and pending functions.
+- A.2 Mapping of those functions to BWSS lifecycle states (`draft`, `review`, `ready`, `sealed`, `frozen`).
+- A.3 Mapping of those functions to the five handoff protocol steps from section 5 of the integration spec.
+- A.4 Stub status (`NotImplementedError` on all six functions) and the frozen surface from stage 1a.
+- A.5 Contract test coverage from stage 1b and the planned stage 3a handoff contract test.
+
+All function bodies in shipped and pending modules raise `NotImplementedError` until the corresponding logic cycle ships. The frozen surface (dataclasses, error codes, module constants) is not subject to revision under v0.10.2 bootstrap rules.
+
+## Spec Index
+
+- `autonomy-output/babel-language-syntax-v0.10.2.md` - normative syntax (EBNF, header grammar, body/handoff split, deterministic serialization).
+- `autonomy-output/babel-language-integration-v0.10.2.md` - normative integration (subsystem mapping, lifecycle, companion `.md`, handoff protocol, Contract Bootstrap Appendix).
+- `autonomy-output/babel-bisc-integrity-v0.10.2.md` - BISC amendment (`.babel` recognition, intent validation, body-only `canonical_sha256`, exit code 6).
+- `autonomy-output/babel-bcpr-v0.10.2.md` - BCPR amendment (virtual JSON, `/blocks/<type>:<id>` patch paths, body-only conflict hash, handoff exclusion).
+
+## Changelog
+
+See `CHANGELOG.md` for the full record of shipped stages and follow-up rounds.

@@ -193,7 +193,18 @@ class SpecIndexBootstrap:
             manifest = self._load_manifest(current)
             basis_target = manifest.get("basis_target")
 
+            # Check for missing basis_target at non-genesis versions
+            # Genesis (v0.1.0) should have null basis_target
             if basis_target is None:
+                # Verify this is actually genesis (v0.1.0)
+                if current != "v0.1.0":
+                    # Non-genesis version with null basis_target is an error
+                    raise BootstrapError(
+                        code=BOOTSTRAP_MISSING_MANIFEST,
+                        version=current,
+                        expected="basis_target present",
+                        actual="null/missing",
+                    )
                 # Genesis reached
                 break
 
@@ -207,18 +218,18 @@ class SpecIndexBootstrap:
         Verify basis_ref chain integrity per spec Section 2.2.
 
         For each manifest M at version V with basis_ref B and basis_target T:
-        1. Verify B is well-formed (sha256:hex64)
-        2. Verify T exists on disk
-        3. Compute hash of T via v0.2.0 canonicalization
-        4. Verify computed hash equals B
-        5. Termination: v0.1.0 must have null basis_ref
+        1. Check genesis termination FIRST: v0.1.0 must have null basis_ref
+        2. Verify B is well-formed (sha256:hex64)
+        3. Verify T exists on disk
+        4. Compute hash of T via v0.2.0 canonicalization
+        5. Verify computed hash equals B
         """
         for i, version in enumerate(versions):
             manifest = self._load_manifest(version)
             basis_ref = manifest.get("basis_ref")
             basis_target = manifest.get("basis_target")
 
-            # Check genesis termination
+            # Check genesis termination FIRST
             if version == "v0.1.0":
                 if basis_ref is not None:
                     raise BootstrapError(
@@ -227,6 +238,7 @@ class SpecIndexBootstrap:
                         expected="null",
                         actual=basis_ref,
                     )
+                # Genesis should not have basis_target either
                 if basis_target is not None:
                     raise BootstrapError(
                         code=BOOTSTRAP_GENESIS_HAS_BASIS,
@@ -236,8 +248,17 @@ class SpecIndexBootstrap:
                     )
                 continue
 
+            # For non-genesis versions, basis_ref must be present and well-formed
+            if not basis_ref:
+                raise BootstrapError(
+                    code=BOOTSTRAP_INVALID_BASIS_REF,
+                    version=version,
+                    expected="sha256:[0-9a-f]{64}",
+                    actual=basis_ref,
+                )
+
             # Verify basis_ref format
-            if not basis_ref or not BASIS_REF_PATTERN.match(basis_ref):
+            if not BASIS_REF_PATTERN.match(basis_ref):
                 raise BootstrapError(
                     code=BOOTSTRAP_INVALID_BASIS_REF,
                     version=version,
@@ -266,6 +287,7 @@ class SpecIndexBootstrap:
             computed_hash = canonical_sha256(predecessor_path)
             expected_hash = basis_ref
 
+            # Check hash mismatch (basis_ref is well-formed but doesn't match)
             if computed_hash != expected_hash:
                 raise BootstrapError(
                     code=BOOTSTRAP_BASIS_MISMATCH,
