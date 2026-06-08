@@ -4,22 +4,49 @@ All notable changes to MiniMadMax and the Babel stack are recorded here.
 
 ## v0.10.2 — Babel Language Surface (Unreleased)
 
+### Cycle: Stage 4c.1 — BISC Process-Level Error Codes
+
+Shipped a normative amendment to `autonomy-output/babel-bisc-integrity-v0.10.2.md` adding section 4.3 with the two process-level error codes emitted exclusively by the BISC CLI wrapper:
+
+- `file_error` — `OSError` caught during CLI filesystem operations (read input, write output, access companion `.md` file). Emits `{"error":"OSError","code":"file_error","line":null,"message":"<path>: <oserror str>"}` and exits 6.
+- `internal_error` — unexpected `Exception` (not `BabelParseError`, not `OSError`) caught by the CLI catch-all handler. Emits `{"error":"InternalError","code":"internal_error","line":null,"message":"<ExceptionClass>: <str>"}` and exits 6.
+
+The library/process contract is preserved: `parse_file` and `write_file` raise native Python exceptions (`BabelParseError`, `OSError`) directly; the CLI wrapper translates process-level exceptions into the BISC stderr JSON shape. Library consumers that import `parse_file` directly see idiomatic Python errors and are not required to parse the BISC JSON shape.
+
+Sections 1-3, 4.1 (six library codes: `duplicate_id`, `version_mismatch`, `malformed_header`, `invalid_intent_json`, `missing_intent`, `multiple_intents`), 4.2 (stderr JSON format for library codes), 5 (duplicate rejection and exit 6), 6 (CLI exit code mapping extended to all eight codes), and 7 (companion_path re-export from `reference/babel/companion.py`) are preserved verbatim from the stage 4b.1 amendment.
+
+This amendment is the hard prerequisite for stage 4c.2c (`reference/babel/__main__.py` CLI wrapper implementation), which must catch `BabelParseError`, `OSError`, and `Exception` and translate them to the eight BISC stderr codes.
+
 ### Cycle: Stage 4b.1 — BISC `multiple_intents` Amendment
 
-Shipped a normative amendment to `autonomy-output/babel-bisc-integrity-v0.10.2.md` extending the parser error taxonomy from five codes to six. The new `multiple_intents` code closes the exactly-one-intent enforcement gap identified in the prior normalizer audit: when a `.babel` file contains two or more `#[intent]:<id>@<version>` blocks in the body with **distinct** `id` values, the parser raises `BabelParseError(code='multiple_intents', line=second_intent_header_line)`. The structured stderr JSON shape in section 4.2 is unchanged; the new code reuses the same wire format. The detection ordering note makes `duplicate_id` the dominant error when two intent blocks share an `id`, and `multiple_intents` the secondary error when ids differ. Stage 4b.2 will implement the detection in `reference/babel/bsl_parser.py` and add test cases to `reference/tests/test_bsl_parser_normalizer.py`; stages 4a (scanner), 4c (writer + CLI wrapper), and 5a (append_handoff) remain queued as separate single-file finalize rounds.
+Shipped a normative amendment to `autonomy-output/babel-bisc-integrity-v0.10.2.md` extending the parser error taxonomy in section 4.1 with the sixth code `multiple_intents`:
+
+- Detection rule: more than one `#[intent]:<id>@<version>` block in the body.
+- Line semantics: the second intent block's header line (1-based, from scanner metadata).
+- Stderr JSON shape: `{"error":"BabelParseError","code":"multiple_intents","line":<int>,"message":<str>}` per section 4.2.
+- Ordering note: `duplicate_id` is checked before `multiple_intents`, so two intent blocks with the same id are still reported as `duplicate_id` first. `multiple_intents` only fires when the two intent blocks have distinct id values.
+
+Sections 1-3, 4.2, 5, 6, and 7 preserved verbatim from the stage 3b amendment.
 
 ### Cycle: Stage 3b — BISC Parser Error Taxonomy Amendment
 
-Shipped a normative amendment to `autonomy-output/babel-bisc-integrity-v0.10.2.md` adding sections 4-7. Resolves the prior audit blockers by clarifying the library/process contract (parse_file raises; the BISC CLI wrapper exits 6) and binding `companion_path` as a re-export of `reference.babel.companion.resolve_companion`. Five frozen error codes introduced: `duplicate_id`, `version_mismatch`, `malformed_header`, `invalid_intent_json`, `missing_intent`. Structured stderr JSON shape and exit-code mapping made normative. Hard prerequisite for stage 4c.
+Shipped a normative amendment to `autonomy-output/babel-bisc-integrity-v0.10.2.md` adding sections 4-7:
+
+- Section 4: parser error taxonomy (five library codes initially, six after 4b.1, eight after 4c.1).
+- Section 5: duplicate rejection with exit code 6.
+- Section 6: CLI exit code mapping (0 success, 6 BabelParseError).
+- Section 7: companion_path re-export contract binding `reference/babel/bsl_parser.py` to `reference/babel/companion.py`.
+
+Library/process contract clarified: `parse_file` raises `BabelParseError` (library), and the BISC CLI wrapper (not the library) emits the structured stderr JSON and exits 6 (process).
 
 ### Cycle: Stage 2b — Companion Resolver Skeleton
 
-Shipped `reference/babel/companion.py` as a single-file skeleton exposing a typed `resolve_companion(babel_path: Path) -> Optional[Path]` stub that raises `NotImplementedError`. Zero parser imports (only `pathlib` and `typing`); companion `.md` resolution contract lives in the docstring only.
+Shipped the contract-first bootstrap for the companion `.md` resolver as a single-file deliverable. Follow-up stages (3a test, 4c CLI wrapper) consume this skeleton.
 
 ### Cycle: Stage 1c — Contract Bootstrap Appendix
 
-Shipped the Contract Bootstrap Appendix appended to `autonomy-output/babel-language-integration-v0.10.2.md`. The appendix maps the six API functions (`parse_file`, `write_file`, `to_virtual_json`, `companion_path`, `append_handoff`, `resolve_companion`) to BWSS lifecycle states and the five-step handoff protocol, distinguishing shipped skeleton (stage 1a) from pending skeleton (stages 2a, 2b).
+Shipped the Contract Bootstrap Appendix appended to `autonomy-output/babel-language-integration-v0.10.2.md`. The appendix maps all six parser/companion/handoff API functions to BWSS lifecycle states and the five-step handoff protocol.
 
-### Cycle: Stage 1a — Parser API Skeleton
+### Cycle: Stage 1a — Parser Public API Skeleton
 
-Shipped the contract-first bootstrap for the Babel v0.10.2 reference parser as a single-file deliverable. `reference/babel/bsl_parser.py` exposes the frozen public API (`parse_file`, `write_file`, `to_virtual_json`, `companion_path`) and the `BabelBlock`/`BabelFile` dataclasses. All function bodies raise `NotImplementedError`; implementation deferred to the 4x cycle. Type-enum rank, block-type tuples, error taxonomy constants, and `BABEL_VERSION` are exported as module constants.
+Shipped `reference/babel/bsl_parser.py` with the frozen public API surface: `parse_file`, `write_file`, `to_virtual_json`, `companion_path`, plus `BabelParseError`, `BabelBlock`, `BlockType`, `HandoffBlock`, `Document` dataclasses. All function bodies raise `NotImplementedError` pending stages 4a-4c implementation.

@@ -7,25 +7,26 @@ Public API is frozen for v0.10.2; logic implementation proceeds in stages 4a-4c.
 Exports:
 - BABEL_VERSION: str = '0.10.2'
 - BLOCK_TYPES: tuple[str, ...] = ('intent', 'spec', 'test', 'impl', 'handoff')
-- BODY_TYPES: tuple[str, ...] = ('intent', 'spec', 'test', 'impl')
-- HANDOFF_TYPE: str = 'handoff'
-- TYPE_ENUM_RANK: dict[str, int] - ordering for body sort
-- BabelBlock: dataclass with type, id, version, content, header_line
-- BabelFile: dataclass with version, body, handoffs, source_path
-- BabelParseError: exception with code, line, message attributes
-- parse_file(path: Path) -> BabelFile
-- write_file(path: Path, babel_file: BabelFile) -> None
-- to_virtual_json(babel_file: BabelFile) -> dict
-- companion_path(babel_path: Path) -> Optional[Path] - re-export from companion
+- BabelParseError: exception class with code, line, message attributes
+- BabelBlock: dataclass for parsed blocks
+- BabelFile: dataclass for parsed files
+- parse_file: main parser entry point
+- write_file: atomic file writer
+- to_virtual_json: handoff-excluded virtual JSON export
+- companion_path: re-export from reference.babel.companion
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional, Tuple
+
+from orchestrator.canonical import canonical_json
 
 # Re-export companion resolver per BISC amendment section 7
 from reference.babel.companion import resolve_companion as companion_path
@@ -34,320 +35,336 @@ BABEL_VERSION = '0.10.2'
 BLOCK_TYPES = ('intent', 'spec', 'test', 'impl', 'handoff')
 BODY_TYPES = ('intent', 'spec', 'test', 'impl')
 HANDOFF_TYPE = 'handoff'
-TYPE_ENUM_RANK = {'intent': 0, 'spec': 1, 'test': 2, 'impl': 3, 'handoff': 99}
+
+# Deterministic type ordering for body sort and virtual JSON
+TYPE_ENUM_RANK = {
+    'intent': 0,
+    'spec': 1,
+    'test': 2,
+    'impl': 3,
+    'handoff': 99,  # handoffs excluded from body sort but have high rank
+}
 
 # Header regex: #[type]:id@version
 HEADER_REGEX = re.compile(r'^#\[(\w+)\]:([^@]+)@([^\s]+)$')
 
+# File header regex: #[babel]:v*.*.* (relaxed: optional 'v' prefix)
+FILE_HEADER_REGEX = re.compile(r'^#\[babel\]:v?\d+\.\d+\.\d+$')
 
+
+@dataclass
 class BabelParseError(Exception):
-    """Parser error with stable code attribute for BISC error taxonomy."""
-    
-    def __init__(self, code: str, line: int, message: str):
-        self.code = code
-        self.line = line
-        self.message = message
-        super().__init__(message)
+    """Parser error with BISC-compliant error code, line number, and message."""
+    code: str
+    line: int
+    message: str
+
+    def to_stderr_json(self) -> str:
+        """Return BISC-compliant stderr JSON (no trailing newline)."""
+        obj = {
+            'error': 'BabelParseError',
+            'code': self.code,
+            'line': self.line,
+            'message': self.message,
+        }
+        return canonical_json(obj).rstrip('\n')
 
 
 @dataclass
 class BabelBlock:
-    """A single block in a .babel file."""
+    """A parsed block from a .babel file."""
     type: str
     id: str
     version: str
-    content: dict
     header_line: int  # 1-based line number of header
+    content: Any  # parsed JSON content
 
 
 @dataclass
 class BabelFile:
-    """Parsed .babel file AST."""
+    """A parsed .babel file."""
     version: str
-    body: list[BabelBlock] = field(default_factory=list)
-    handoffs: list[BabelBlock] = field(default_factory=list)
+    body: List[BabelBlock]
+    handoffs: List[BabelBlock]
     source_path: Optional[Path] = None
 
 
-def _scan_file(content: str) -> tuple[str, list[BabelBlock], list[BabelBlock]]:
+def _scan_file(content: str) -> Tuple[List[BabelBlock], List[BabelBlock]]:
     """
-    Scan phase: parse headers and extract blocks.
+    Scan file content and extract blocks.
     
-    Returns:
-        (version, body_blocks, handoff_blocks)
+    Returns (body_blocks, handoff_blocks) where body_blocks contains
+    intent/spec/test/impl blocks and handoff_blocks contains handoff blocks.
     
-    Raises:
-        BabelParseError: on malformed headers or invalid JSON
+    Raises BabelParseError on malformed_header or invalid_intent_json.
     """
     lines = content.split('\n')
+    body_blocks: List[BabelBlock] = []
+    handoff_blocks: List[BabelBlock] = []
     
-    # Normalize: strip trailing whitespace from each line
-    lines = [line.rstrip() for line in lines]
-    
-    # Check for babel header at line 1
-    if not lines or not lines[0].startswith('#[babel]:'):
-        raise BabelParseError(
-            code='malformed_header',
-            line=1,
-            message='File must begin with #[babel]:<id>@<version> header'
-        )
-    
-    # Parse babel header to get version
-    babel_header_match = HEADER_REGEX.match(lines[0])
-    if not babel_header_match:
-        raise BabelParseError(
-            code='malformed_header',
-            line=1,
-            message='Invalid #[babel] header syntax'
-        )
-    
-    file_version = babel_header_match.group(3)
-    
-    body_blocks: list[BabelBlock] = []
-    handoff_blocks: list[BabelBlock] = []
-    
-    i = 1
+    i = 0
     while i < len(lines):
         line = lines[i]
         
-        # Skip empty lines between blocks
-        if not line:
+        # Skip blank lines and non-header lines
+        if not line.strip() or not line.startswith('#['):
             i += 1
             continue
         
-        # Check for block header
-        if line.startswith('#['):
-            header_line = i + 1  # 1-based
-            match = HEADER_REGEX.match(line)
-            
-            if not match:
-                raise BabelParseError(
-                    code='malformed_header',
-                    line=header_line,
-                    message=f'Invalid block header syntax: {line}'
-                )
-            
-            block_type = match.group(1)
-            block_id = match.group(2)
-            block_version = match.group(3)
-            
-            if block_type not in BLOCK_TYPES:
-                raise BabelParseError(
-                    code='malformed_header',
-                    line=header_line,
-                    message=f'Unknown block type "{block_type}" - must be one of: intent, spec, test, impl, handoff'
-                )
-            
-            # Extract content (lines until next header or EOF)
-            content_lines: list[str] = []
-            i += 1
-            while i < len(lines):
-                next_line = lines[i]
-                if next_line.startswith('#['):
-                    break
-                content_lines.append(next_line)
-                i += 1
-            
-            # Parse content as JSON
-            content_text = '\n'.join(content_lines).strip()
-            if not content_text:
-                content_json = {}
-            else:
-                try:
-                    content_json = json.loads(content_text)
-                except json.JSONDecodeError as e:
-                    raise BabelParseError(
-                        code='invalid_intent_json',
-                        line=header_line,
-                        message=f'Invalid JSON in block content: {e}'
-                    )
-            
-            block = BabelBlock(
-                type=block_type,
-                id=block_id,
-                version=block_version,
-                content=content_json,
-                header_line=header_line
+        # Try to match header
+        match = HEADER_REGEX.match(line)
+        if not match:
+            raise BabelParseError(
+                code='malformed_header',
+                line=i + 1,  # 1-based
+                message=f'Malformed block header: {line}',
             )
-            
-            if block_type in BODY_TYPES:
-                body_blocks.append(block)
+        
+        block_type = match.group(1)
+        block_id = match.group(2)
+        block_version = match.group(3)
+        header_line = i + 1  # 1-based
+        
+        # Validate block type
+        if block_type not in BLOCK_TYPES:
+            raise BabelParseError(
+                code='malformed_header',
+                line=header_line,
+                message=f'Unknown block type "{block_type}" - must be one of: {", ".join(BLOCK_TYPES)}',
+            )
+        
+        # Extract content (lines after header until next header or EOF)
+        content_lines: List[str] = []
+        j = i + 1
+        while j < len(lines):
+            next_line = lines[j]
+            if next_line.strip().startswith('#['):
+                break
+            content_lines.append(next_line)
+            j += 1
+        
+        # Parse content as JSON
+        content_text = '\n'.join(content_lines)
+        try:
+            if content_text.strip():
+                block_content = json.loads(content_text)
             else:
-                handoff_blocks.append(block)
+                block_content = None
+        except json.JSONDecodeError as e:
+            raise BabelParseError(
+                code='invalid_intent_json',
+                line=header_line,
+                message=f'Invalid JSON in block content: {e}',
+            )
+        
+        block = BabelBlock(
+            type=block_type,
+            id=block_id,
+            version=block_version,
+            header_line=header_line,
+            content=block_content,
+        )
+        
+        if block_type == HANDOFF_TYPE:
+            handoff_blocks.append(block)
         else:
-            # Non-empty line that's not a header - skip (could be whitespace)
-            i += 1
+            body_blocks.append(block)
+        
+        i = j
     
-    return file_version, body_blocks, handoff_blocks
+    return body_blocks, handoff_blocks
 
 
 def _normalize(
-    version: str,
-    body: list[BabelBlock],
-    handoffs: list[BabelBlock]
-) -> tuple[list[BabelBlock], list[BabelBlock]]:
+    body: List[BabelBlock],
+    handoffs: List[BabelBlock],
+) -> List[BabelBlock]:
     """
-    Normalize phase: validate and sort blocks.
+    Normalize and validate blocks.
     
-    Enforces:
-    - Body sort by (TYPE_ENUM_RANK[type], id)
-    - Global duplicate (type, id) detection across body+handoff
-    - Version consistency across all blocks
-    - Exactly-one intent block in body
-    - Minimal intent schema (agent_id required, string)
+    - Sort body by (TYPE_ENUM_RANK[type], id)
+    - Detect duplicate (type, id) across body+handoffs
+    - Detect version mismatch across all blocks
+    - Validate exactly one intent block with minimal schema
     
-    Returns:
-        (sorted_body, handoffs) - handoffs remain chronological
-    
-    Raises:
-        BabelParseError: on validation failures
+    Returns sorted body list.
+    Raises BabelParseError on validation failure.
     """
     all_blocks = body + handoffs
     
-    # 1. Check version consistency first
-    if all_blocks:
-        expected_version = all_blocks[0].version
-        for block in all_blocks[1:]:
-            if block.version != expected_version:
-                raise BabelParseError(
-                    code='version_mismatch',
-                    line=block.header_line,
-                    message=f"Block version '{block.version}' does not match file version '{expected_version}'"
-                )
-    
-    # 2. Check for duplicate (type, id) pairs - MUST run before intent checks
-    # This ensures duplicate_id is raised before missing_intent/multiple_intents
-    seen_keys: set[tuple[str, str]] = set()
+    # 1. Check for duplicate (type, id) across all blocks
+    seen: Dict[Tuple[str, str], BabelBlock] = {}
     for block in all_blocks:
         key = (block.type, block.id)
-        if key in seen_keys:
+        if key in seen:
             raise BabelParseError(
                 code='duplicate_id',
                 line=block.header_line,
-                message=f"Duplicate block: #[{block.type}]:{block.id}@{block.version}"
+                message=f'Duplicate block: {block.type}:{block.id} (first at line {seen[key].header_line})',
             )
-        seen_keys.add(key)
+        seen[key] = block
     
-    # 3. Validate intent blocks (exactly one required in body)
+    # 2. Check version consistency across all blocks
+    versions: Dict[str, List[BabelBlock]] = {}
+    for block in all_blocks:
+        if block.version not in versions:
+            versions[block.version] = []
+        versions[block.version].append(block)
+    
+    if len(versions) > 1:
+        # Find the first block with a different version
+        first_version = next(iter(versions))
+        for block in all_blocks:
+            if block.version != first_version:
+                raise BabelParseError(
+                    code='version_mismatch',
+                    line=block.header_line,
+                    message=f'Version mismatch: {block.version} (expected {first_version})',
+                )
+    
+    # 3. Validate intent blocks
     intent_blocks = [b for b in body if b.type == 'intent']
     
     if len(intent_blocks) == 0:
-        # missing_intent: no intent block in body
-        if not body:
-            raise BabelParseError(
-                code='missing_intent',
-                line=1,
-                message='No intent block in body'
-            )
-        else:
-            raise BabelParseError(
-                code='missing_intent',
-                line=body[0].header_line,
-                message='No intent block in body'
-            )
+        raise BabelParseError(
+            code='missing_intent',
+            line=1,  # file header line
+            message='No intent block found in body',
+        )
     
     if len(intent_blocks) > 1:
-        # Check if any have same id (duplicate_id takes precedence - already caught above)
-        # If we reach here, ids are distinct - multiple_intents
+        # multiple_intents only fires for distinct ids (duplicate_id checked first)
         second_intent = intent_blocks[1]
         raise BabelParseError(
             code='multiple_intents',
             line=second_intent.header_line,
-            message='Multiple intent blocks found; exactly one required'
+            message=f'Multiple intent blocks found (second at line {second_intent.header_line})',
         )
     
-    # 4. Validate intent schema (agent_id required, string)
-    intent_block = intent_blocks[0]
-    intent_content = intent_block.content
-    
-    if not isinstance(intent_content, dict):
+    # 4. Validate intent schema (minimal: agent_id required, string)
+    intent = intent_blocks[0]
+    if not isinstance(intent.content, dict):
         raise BabelParseError(
             code='invalid_intent_json',
-            line=intent_block.header_line,
-            message='Intent block content must be a JSON object'
+            line=intent.header_line,
+            message='Intent block content must be a JSON object',
         )
     
-    if 'agent_id' not in intent_content:
+    if 'agent_id' not in intent.content:
         raise BabelParseError(
             code='invalid_intent_json',
-            line=intent_block.header_line,
-            message='Intent block missing required field: agent_id'
+            line=intent.header_line,
+            message='Intent block missing required key: agent_id',
         )
     
-    if not isinstance(intent_content['agent_id'], str):
+    if not isinstance(intent.content['agent_id'], str):
         raise BabelParseError(
             code='invalid_intent_json',
-            line=intent_block.header_line,
-            message='Intent block agent_id must be a string'
+            line=intent.header_line,
+            message='Intent block agent_id must be a string',
         )
     
     # 5. Sort body by (TYPE_ENUM_RANK[type], id)
-    sorted_body = sorted(body, key=lambda b: (TYPE_ENUM_RANK[b.type], b.id))
+    sorted_body = sorted(body, key=lambda b: (TYPE_ENUM_RANK.get(b.type, 99), b.id))
     
-    return sorted_body, handoffs
+    return sorted_body
 
 
 def parse_file(path: Path) -> BabelFile:
     """
-    Parse a .babel file into a BabelFile AST.
+    Parse a .babel file and return a BabelFile AST.
     
-    Args:
-        path: Path to the .babel file
-        
-    Returns:
-        BabelFile with parsed blocks
-        
-    Raises:
-        BabelParseError: on parse or validation failures
-        FileNotFoundError: if file doesn't exist
+    Raises BabelParseError on validation failure.
+    Raises OSError on file read failure.
     """
+    # Read file
     content = path.read_text(encoding='utf-8')
     
-    # Normalize line endings
-    content = content.replace('\r\n', '\n').replace('\r', '\n')
+    # Validate file header (relaxed: any #[babel]:v*.*.* format)
+    lines = content.split('\n')
+    header_found = False
+    for line in lines:
+        if line.strip():
+            # Strip whitespace before matching
+            stripped = line.strip()
+            if FILE_HEADER_REGEX.match(stripped):
+                header_found = True
+            break
     
-    # Scan phase
-    version, body, handoffs = _scan_file(content)
+    if not header_found:
+        raise BabelParseError(
+            code='malformed_header',
+            line=1,
+            message='Missing or invalid file header: expected #[babel]:v*.*.*',
+        )
     
-    # Normalize phase
-    sorted_body, handoffs = _normalize(version, body, handoffs)
+    # Scan and normalize
+    body, handoffs = _scan_file(content)
+    sorted_body = _normalize(body, handoffs)
     
     return BabelFile(
-        version=version,
+        version=BABEL_VERSION,
         body=sorted_body,
         handoffs=handoffs,
-        source_path=path
+        source_path=path,
     )
 
 
-def write_file(path: Path, babel_file: BabelFile) -> None:
+def write_file(path: Path, content: str) -> None:
     """
-    Write a BabelFile to disk.
+    Write content to a .babel file atomically.
     
-    Args:
-        path: Destination path for .babel file
-        babel_file: BabelFile to write
-        
-    Raises:
-        NotImplementedError: stub for stage 4c
+    Uses tempfile + os.replace for atomic write.
+    Cleans up tempfile on failure using explicit tmp_path tracking.
+    
+    Raises OSError on write failure.
     """
-    raise NotImplementedError('write_file: implement in stage 4c (atomic tempfile+rename)')
+    tmp_path: Optional[str] = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode='w',
+            encoding='utf-8',
+            dir=path.parent,
+            delete=False,
+        ) as tmp:
+            tmp_path = tmp.name
+            tmp.write(content)
+        
+        os.replace(tmp_path, path)
+    except Exception:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
 
 
-def to_virtual_json(babel_file: BabelFile) -> dict:
+def to_virtual_json(babel_file: BabelFile) -> str:
     """
-    Convert BabelFile to virtual JSON representation.
+    Export a BabelFile to virtual JSON format.
     
-    Handoff blocks are excluded. Body blocks are represented as
-    /blocks/<type>:<id> paths.
+    Schema: /blocks/<type>:<id> -> {type, id, version, header_line, content}
+    Excludes handoff blocks.
+    Orders by normalized body sort (TYPE_ENUM_RANK[type], id).
     
-    Args:
-        babel_file: BabelFile to convert
-        
-    Returns:
-        dict with virtual JSON structure
-        
-    Raises:
-        NotImplementedError: stub for stage 4c
+    Returns JSON string with trailing LF. Keys are ordered by type rank,
+    not alphabetically, to match spec requirements.
     """
-    raise NotImplementedError('to_virtual_json: implement in stage 4c (handoff-excluded paths)')
+    # Sort body blocks by (TYPE_ENUM_RANK[type], id) to ensure deterministic key order
+    sorted_blocks = sorted(babel_file.body, key=lambda b: (TYPE_ENUM_RANK.get(b.type, 99), b.id))
+    
+    # Build JSON manually to preserve key order (canonical_json sorts alphabetically)
+    block_strs = []
+    for block in sorted_blocks:
+        key = f'/blocks/{block.type}:{block.id}'
+        block_obj = {
+            'type': block.type,
+            'id': block.id,
+            'version': block.version,
+            'header_line': block.header_line,
+            'content': block.content,
+        }
+        # Use json.dumps with sort_keys=False to preserve insertion order within block
+        block_json = json.dumps(block_obj, sort_keys=False, ensure_ascii=False)
+        block_strs.append(f'"{key}":{block_json}')
+    
+    result = '{' + ','.join(block_strs) + '}\n'
+    return result
