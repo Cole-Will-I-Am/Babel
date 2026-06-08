@@ -48,20 +48,33 @@ HEADER_REGEX = re.compile(r'^#\[(\w+)\]:([^@]+)@([^\s]+)$')
 FILE_HEADER_REGEX = re.compile(r'^#\[babel\]:v?\d+\.\d+\.\d+')
 
 
-def resolve_companion(path: Path) -> Path:
+def resolve_companion(path: Path) -> Optional[Path]:
     """
     Resolve the companion .md file path for a .babel file.
     
     Given a .babel file path, returns the sibling .md file with the same
-    stem name. For example, 'workflow.babel' -> 'workflow.md'.
+    stem name if it exists. For example, 'workflow.babel' -> 'workflow.md'.
     
     Args:
         path: Path to a .babel file.
     
     Returns:
-        Path to the companion .md file.
+        Path to the companion .md file if it exists, None otherwise.
+        Returns None if path does not have .babel suffix.
+        Returns None if the .md file does not exist on disk.
     """
-    return path.with_suffix('.md')
+    # Return None for non-.babel paths
+    if path.suffix != '.babel':
+        return None
+    
+    # Compute companion path
+    companion_path = path.with_suffix('.md')
+    
+    # Return None if companion doesn't exist
+    if not companion_path.exists():
+        return None
+    
+    return companion_path
 
 
 @dataclass
@@ -206,9 +219,9 @@ def _normalize(
     """
     Normalize and validate blocks.
     
+    - Check version consistency across all blocks FIRST
     - Sort body by (TYPE_ENUM_RANK[type], id)
     - Detect duplicate (type, id) across body+handoffs
-    - Detect version mismatch across all blocks
     - Validate exactly one intent block with minimal schema
     
     Returns sorted body list.
@@ -216,19 +229,7 @@ def _normalize(
     """
     all_blocks = body + handoffs
     
-    # 1. Check for duplicate (type, id) across all blocks
-    seen: Dict[Tuple[str, str], BabelBlock] = {}
-    for block in all_blocks:
-        key = (block.type, block.id)
-        if key in seen:
-            raise BabelParseError(
-                code='duplicate_id',
-                line=block.header_line,
-                message=f'Duplicate block: {block.type}:{block.id} (first at line {seen[key].header_line})',
-            )
-        seen[key] = block
-    
-    # 2. Check version consistency across all blocks
+    # 1. Check version consistency FIRST (before duplicate check)
     versions: Dict[str, List[BabelBlock]] = {}
     for block in all_blocks:
         if block.version not in versions:
@@ -245,6 +246,18 @@ def _normalize(
                     line=block.header_line,
                     message=f'Version mismatch: {block.version} (expected {first_version})',
                 )
+    
+    # 2. Check for duplicate (type, id) across all blocks
+    seen: Dict[Tuple[str, str], BabelBlock] = {}
+    for block in all_blocks:
+        key = (block.type, block.id)
+        if key in seen:
+            raise BabelParseError(
+                code='duplicate_id',
+                line=block.header_line,
+                message=f'Duplicate block: {block.type}:{block.id} (first at line {seen[key].header_line})',
+            )
+        seen[key] = block
     
     # 3. Validate intent blocks
     intent_blocks = [b for b in body if b.type == 'intent']

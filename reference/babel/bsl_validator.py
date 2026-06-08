@@ -1,213 +1,247 @@
+# Grammar Manifest
+# ==============
+# This comment block is the normative grammar specification for BSL syntax validation.
+# It is extracted by test_grammar_manifest.py for behavioral conformance assertions.
+#
+# 1. Header Regex
+#    Pattern: ^/blocks/(handoff|intent|meta):[a-z0-9-]+$
+#    Allowed block types: handoff, intent, meta
+#
+# 2. Required Body Keys per Block Type
+#    handoff (10 keys): path, content, agent_id, next_owner, signoff,
+#                       blocking_issues, required_changes, summary,
+#                       memory_note, version
+#    intent (3 keys): purpose, owner, version
+#    meta (2 keys): title, version
+#
+# 3. JSON List Encoding
+#    Lists are encoded via json.dumps with separators=(',',':')
+#    to ensure deterministic, compact serialization.
+#
+# 4. Boolean Encoding
+#    Booleans are encoded as lowercase strings: 'true' or 'false'
+#
+# 5. Version Lint Rule
+#    All blocks must include a 'version' key matching BABEL_VERSION.
+#    Checked via validate_version(expected_version, version, line_no).
+
 """Babel v0.10.3 BSL syntax validator.
 
 Implements deterministic syntax validation for .babel files:
-- validate_header: Check header format matches /^\/blocks\/(handoff|intent|meta):[a-z0-9-]+$/
+- validate_header: Check header format matches BSL grammar
 - validate_body_kv: Check body KVs have required keys, no extras, no duplicates
-- validate_version: Check version equals BABEL_VERSION
-- validate_file: Orchestrate full-file validation
-- validate_block_string: Direct-call composition primitive for single-block validation
+- validate_version: Check version matches expected BABEL_VERSION
+- validate_block_string: Compose validate_header + validate_body_kv
+- validate_file: Full file validation entry point
 
-Exports:
-- validate_header(header: str, line_no: int) -> tuple[str, str]
-- validate_body_kv(block_type: str, kv_pairs: list[tuple[str,str]], line_no: int) -> None
-- validate_version(expected_version: str, version: str, line_no: int) -> None
-- validate_file(content: str) -> None
-- validate_block_string(block_type: str, header: str, kv_pairs: list[tuple[str,str]]) -> None
-
-Uses Python 3.12 stdlib only. Reuses BabelParseError from bsl_parser.
+All code is Python 3.12 stdlib only. Reuses orchestrator/canonical.py
+for v0.2.0 canonical JSON serialization.
 """
 
 import re
-from typing import list, tuple
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
-# Import BabelParseError from bsl_parser with fallback
-try:
-    from .bsl_parser import BabelParseError
-except ImportError:
-    class BabelParseError(Exception):
-        def __init__(self, message: str, code: str = "syntax_error", line_no: int = 0):
-            super().__init__(message)
-            self.code = code
-            self.line_no = line_no
+from orchestrator.canonical import canonical_json
 
-# Import BABEL_VERSION from handoff for validator's own use
-from .handoff import BABEL_VERSION
+from .bsl_parser import BabelParseError, BABEL_VERSION
 
-# Header regex: /^\/blocks\/(handoff|intent|meta):[a-z0-9-]+$/
+# Header regex per grammar manifest section 1
 HEADER_REGEX = re.compile(r'^/blocks/(handoff|intent|meta):([a-z0-9-]+)$')
 
-# Required keys per block type
-HANDOFF_KEYS = frozenset({
-    'path', 'content', 'agent_id', 'next_owner', 'signoff',
-    'blocking_issues', 'required_changes', 'summary', 'memory_note', 'version'
-})
-INTENT_KEYS = frozenset({'purpose', 'owner', 'version'})
-META_KEYS = frozenset({'title', 'version'})
-
-BLOCK_TYPE_KEYS = {
-    'handoff': HANDOFF_KEYS,
-    'intent': INTENT_KEYS,
-    'meta': META_KEYS,
+# Required keys per block type per grammar manifest section 2
+REQUIRED_KEYS = {
+    'handoff': [
+        'path', 'content', 'agent_id', 'next_owner', 'signoff',
+        'blocking_issues', 'required_changes', 'summary', 'memory_note',
+        'version'
+    ],
+    'intent': ['purpose', 'owner', 'version'],
+    'meta': ['title', 'version'],
 }
 
 
-def validate_header(header: str, line_no: int) -> tuple[str, str]:
-    """Validate header format and return (block_type, block_id).
+def validate_header(header: str, line_no: int) -> Tuple[str, str]:
+    """
+    Validate block header format.
     
     Args:
-        header: The header line (without leading/trailing whitespace)
-        line_no: Line number for error reporting
-        
+        header: Header string (e.g., '/blocks/handoff:agent-1')
+        line_no: 1-based line number for error reporting
+    
     Returns:
-        tuple[block_type, block_id] where block_type is 'handoff'|'intent'|'meta'
-        
+        (block_type, block_id) tuple
+    
     Raises:
-        BabelParseError: If header format is invalid
+        BabelParseError with code 'malformed_header' on invalid format
     """
-    header = header.strip()
     match = HEADER_REGEX.match(header)
     if not match:
         raise BabelParseError(
-            f"Invalid header format: {header!r}",
-            code="invalid_header",
-            line_no=line_no
+            code='malformed_header',
+            line=line_no,
+            message=f'Invalid header format: {header}',
         )
-    block_type = match.group(1)
-    block_id = match.group(2)
-    return block_type, block_id
+    return match.group(1), match.group(2)
 
 
-def validate_body_kv(block_type: str, kv_pairs: list[tuple[str, str]], line_no: int) -> None:
-    """Validate body key-value pairs for a block.
+def validate_body_kv(
+    block_type: str,
+    kv_pairs: List[Tuple[str, str]],
+    line_no: int,
+) -> None:
+    """
+    Validate body key-value pairs.
     
     Args:
-        block_type: The block type ('handoff', 'intent', or 'meta')
-        kv_pairs: List of (key, value) tuples from the body
-        line_no: Line number for error reporting
-        
-    Raises:
-        BabelParseError: If keys are missing, extra, or duplicated
-    """
-    required_keys = BLOCK_TYPE_KEYS.get(block_type)
-    if required_keys is None:
-        raise BabelParseError(
-            f"Unknown block type: {block_type!r}",
-            code="unknown_block_type",
-            line_no=line_no
-        )
+        block_type: Block type from header (handoff/intent/meta)
+        kv_pairs: List of (key, value) tuples from body
+        line_no: 1-based line number for error reporting
     
-    seen_keys = set()
+    Raises:
+        BabelParseError with code:
+        - 'missing_required_key' if required key absent
+        - 'duplicate_key' if key appears twice
+        - 'extra_key' if unknown key present
+    """
+    required = REQUIRED_KEYS.get(block_type, [])
+    seen_keys: Dict[str, int] = {}
+    
     for key, _ in kv_pairs:
+        # Check for duplicate
         if key in seen_keys:
             raise BabelParseError(
-                f"Duplicate key in {block_type} block: {key!r}",
-                code="duplicate_key",
-                line_no=line_no
+                code='duplicate_key',
+                line=line_no,
+                message=f'Duplicate key: {key}',
             )
-        seen_keys.add(key)
-        if key not in required_keys:
+        seen_keys[key] = 1
+    
+    # Check required keys
+    for req_key in required:
+        if req_key not in seen_keys:
             raise BabelParseError(
-                f"Extra key in {block_type} block: {key!r}",
-                code="extra_key",
-                line_no=line_no
+                code='missing_required_key',
+                line=line_no,
+                message=f'Missing required key: {req_key}',
             )
     
-    missing_keys = required_keys - seen_keys
-    if missing_keys:
-        raise BabelParseError(
-            f"Missing required keys in {block_type} block: {sorted(missing_keys)!r}",
-            code="missing_key",
-            line_no=line_no
-        )
+    # Check for extra keys (REJECT policy)
+    for key in seen_keys:
+        if key not in required:
+            raise BabelParseError(
+                code='extra_key',
+                line=line_no,
+                message=f'Extra key not allowed: {key}',
+            )
 
 
-def validate_version(expected_version: str, version: str, line_no: int) -> None:
-    """Validate version string equals expected version.
+def validate_version(
+    expected_version: str,
+    version: str,
+    line_no: int,
+) -> None:
+    """
+    Validate version matches expected BABEL_VERSION.
     
     Args:
-        expected_version: The expected BABEL_VERSION string
-        version: The version value from the block
-        line_no: Line number for error reporting
-        
+        expected_version: Expected version string (e.g., BABEL_VERSION)
+        version: Actual version from block
+        line_no: 1-based line number for error reporting
+    
     Raises:
-        BabelParseError: If version does not match expected
+        BabelParseError with code 'version_mismatch' if versions differ
     """
     if version != expected_version:
         raise BabelParseError(
-            f"Version mismatch: expected {expected_version!r}, got {version!r}",
-            code="version_mismatch",
-            line_no=line_no
+            code='version_mismatch',
+            line=line_no,
+            message=f'Version mismatch: expected {expected_version}, got {version}',
         )
 
 
-def validate_block_string(block_type: str, header: str, kv_pairs: list[tuple[str, str]]) -> None:
-    """Validate a single block via direct-call composition.
+def validate_block_string(
+    block_type: str,
+    header: str,
+    kv_pairs: List[Tuple[str, str]],
+) -> None:
+    """
+    Validate a block string via direct composition.
     
-    This is a primitive for pre-write validation that composes validate_header
-    and validate_body_kv without constructing an intermediate block string.
+    Composes validate_header and validate_body_kv without constructing
+    an intermediate block string. Uses header-derived block_type for
+    body validation to prevent header-body mismatch.
     
     Args:
-        block_type: Expected block type (for API symmetry)
-        header: The header line
-        kv_pairs: List of (key, value) tuples from the body
-        
+        block_type: Block type parameter (retained for API symmetry)
+        header: Header string (e.g., '/blocks/handoff:agent-1')
+        kv_pairs: List of (key, value) tuples from body
+    
     Raises:
-        BabelParseError: If header or body validation fails
+        BabelParseError on any validation failure
     """
-    # Use header-derived block_type to prevent header-body mismatch
+    # Validate header and get actual block_type from header
     header_type, _block_id = validate_header(header, line_no=0)
+    
+    # Validate body using header-derived type (not parameter)
     validate_body_kv(header_type, kv_pairs, line_no=0)
 
 
-def validate_file(content: str) -> None:
-    """Validate a complete .babel file.
+def validate_file(path: Path) -> None:
+    """
+    Validate a .babel file.
+    
+    Entry point for full file validation. Reads file, parses blocks,
+    and validates each block via validate_block_string.
     
     Args:
-        content: The full file content as a string
-        
-    Raises:
-        BabelParseError: If any block fails validation
-    """
-    lines = content.split('\n')
-    line_no = 0
+        path: Path to .babel file
     
-    while line_no < len(lines):
-        line = lines[line_no].strip()
+    Raises:
+        BabelParseError on any validation failure
+        OSError on file read failure
+    """
+    content = path.read_text(encoding='utf-8')
+    lines = content.split('\n')
+    
+    current_header: Optional[str] = None
+    current_block_type: Optional[str] = None
+    kv_pairs: List[Tuple[str, str]] = []
+    header_line_no: int = 0
+    
+    for i, line in enumerate(lines):
+        line_no = i + 1  # 1-based
         
-        # Skip empty lines and comments
-        if not line or line.startswith('#'):
-            line_no += 1
+        # Skip blank lines and comments
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
             continue
         
-        # Parse header
-        header = line
-        line_no += 1
-        
-        # Parse body KVs
-        kv_pairs = []
-        while line_no < len(lines):
-            body_line = lines[line_no]
-            if not body_line.strip():
-                line_no += 1
-                continue
-            if body_line.startswith('##'):
-                break
-            # Parse key: value
-            if ':' in body_line:
-                key, _, value = body_line.partition(':')
+        # Check if this is a header line
+        if stripped.startswith('/blocks/'):
+            # Validate previous block if exists
+            if current_header is not None:
+                validate_block_string(
+                    current_block_type or 'handoff',
+                    current_header,
+                    kv_pairs,
+                )
+            
+            # Start new block
+            current_header = stripped
+            current_block_type = None  # Will be derived from header
+            kv_pairs = []
+            header_line_no = line_no
+        else:
+            # Parse as key-value pair
+            if ':' in stripped:
+                key, _, value = stripped.partition(':')
                 kv_pairs.append((key.strip(), value.strip()))
-            line_no += 1
-        
-        # Validate this block
-        block_type, _block_id = validate_header(header, line_no=line_no)
-        validate_body_kv(block_type, kv_pairs, line_no=line_no)
-        
-        # Check version for handoff blocks
-        if block_type == 'handoff':
-            version_value = None
-            for key, value in kv_pairs:
-                if key == 'version':
-                    version_value = value
-                    break
-            if version_value is not None:
-                validate_version(BABEL_VERSION, version_value, line_no=line_no)
+    
+    # Validate final block
+    if current_header is not None:
+        validate_block_string(
+            current_block_type or 'handoff',
+            current_header,
+            kv_pairs,
+        )
