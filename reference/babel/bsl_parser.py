@@ -13,7 +13,7 @@ Exports:
 - parse_file: main parser entry point
 - write_file: atomic file writer
 - to_virtual_json: handoff-excluded virtual JSON export
-- companion_path: re-export from reference.babel.companion
+- resolve_companion: resolve companion .md path for a .babel file
 """
 
 from __future__ import annotations
@@ -27,9 +27,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from orchestrator.canonical import canonical_json
-
-# Re-export companion resolver per BISC amendment section 7
-from reference.babel.companion import resolve_companion as companion_path
 
 BABEL_VERSION = '0.10.2'
 BLOCK_TYPES = ('intent', 'spec', 'test', 'impl', 'handoff')
@@ -50,6 +47,22 @@ HEADER_REGEX = re.compile(r'^#\[(\w+)\]:([^@]+)@([^\s]+)$')
 
 # File header regex: #[babel]:v*.*.* (relaxed: optional 'v' prefix)
 FILE_HEADER_REGEX = re.compile(r'^#\[babel\]:v?\d+\.\d+\.\d+$')
+
+
+def resolve_companion(path: Path) -> Path:
+    """
+    Resolve the companion .md file path for a .babel file.
+    
+    Given a .babel file path, returns the sibling .md file with the same
+    stem name. For example, 'workflow.babel' -> 'workflow.md'.
+    
+    Args:
+        path: Path to a .babel file.
+    
+    Returns:
+        Path to the companion .md file.
+    """
+    return path.with_suffix('.md')
 
 
 @dataclass

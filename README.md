@@ -5,107 +5,109 @@ Autonomous multi-agent engineering runtime for the Babel/BCPR/BISC stack.
 ## Components
 
 - **Ollama runtime** — hosts `minimadmax:latest` and profile variants (`balanced`, `precise`, `fast`, `deep`).
-- **GitHub CLI auth** — local `gh` with HTTPS git-credential helper; target repos: `Cole-Will-I-Am/MiniMadMax` (self-config) and `Cole-Will-I-Am/new-lab` (Babel/BCPR/BISC stack).
-- **Babel reference parser** — `reference/babel/bsl_parser.py` (frozen public API, parser core).
-- **Handoff protocol** — `reference/babel/handoff.py` (append + query, multi-agent continuity).
-- **Companion CLI** — `reference/babel/companion.py` (stdlib-only human interface).
-- **BISC pre-commit hooks** — enforce `.babel` file integrity and the BISC error taxonomy (eight codes).
-- **BCPR conflict log** — human-readable chain-of-handoff reader, consumes the BISC stderr JSON shape.
+- **GitHub CLI auth** — local `gh` with HTTPS git-credential helper; target repos: `Cole-Will-I-Am/MiniMadMax`, `Cole-Will-I-Am/new-lab`.
+- **Babel stack** — deterministic human+AI collaboration protocol: BSL (Babel Spec Language), BISC (Babel Integrity & Style Checks), BCPR (Babel Conflict Prevention Rules).
 
-## Babel Project Layout
-
-A Babel project consists of two companion files in a single directory:
-
-- `*.babel` — the deterministic, machine-readable source of truth (intent, spec, test, impl, handoff blocks).
-- `*.md` — the human-readable companion rendered from the `.babel` body (handoffs excluded from body sort, remain chronological).
-
-The `*.md` filename must share the basename of the `*.babel` file; this is the **companion_path contract** enforced by `companion.resolve_companion` and re-exported as `bsl_parser.companion_path`.
-
-## Block Types
-
-- `#[intent]:<id>@<version>` — exactly one per body; carries `agent_id`.
-- `#[spec]:<id>@<version>` — normative spec block.
-- `#[test]:<id>@<version>` — test block.
-- `#[impl]:<id>@<version>` — implementation block.
-- `#[handoff]:handoff-{n}` — chronological handoff block; n starts at 1 and increments.
-
-## Babel Cycles (Releases)
-
-### v0.10.2 — Babel Language Surface (Unreleased)
-
-Parser contract-first bootstrap. Sub-stages 1a-5b define the frozen public API, companion skeleton, BISC error taxonomy, scanner/normalize/writer/CLI logic, and handoff append protocol.
-
-### v0.10.3 — Handoff Query + Companion CLI (Unreleased, planned)
-
-Read-side handoff query protocol and human-facing companion CLI. Sub-stages:
-
-- **6.0 (patch)** — Bump `BABEL_VERSION` to `0.10.3` in `reference/babel/handoff.py`. Patch `append_handoff` to store `next_owner` in the handoff block body dict (keys: `path`, `content`, `agent_id`, `next_owner`, `blocking_issues`, `required_changes`). No signature change; `next_owner` is already a parameter per v0.10.2 stage 5a fixes.
-- **6a (query)** — Implement `get_latest_handoff(path) -> dict|None` and `list_handoffs(path) -> tuple[dict,...]` in `handoff.py` using `parse_file`. Return deserialized dicts with the **frozen handoff schema** (id, agent_id, content, blocking_issues, required_changes, next_owner). Sort by sequential handoff ID numeric suffix. Empty file returns `None` / `()`. Parser errors propagate as `BabelParseError`.
-- **6b (companion)** — Implement `reference/babel/companion.py` as a stdlib-only CLI with three subcommands: `init`, `render`, `validate`. Uses only `argparse`, `subprocess`, `json`, `pathlib`. Imports `handoff.py` query methods for `init`/`render`; `validate` shells out to `python -m babel <path>` via `subprocess.run` to preserve the zero-dependency boundary.
-- **6c (query tests)** — Author `reference/tests/test_handoff_query.py` covering deterministic ordering, empty file handling, parser error propagation, and schema compliance (all six frozen keys present, including `next_owner`).
-- **6d (companion tests)** — Author `reference/tests/test_companion_cli.py` covering `init` scaffolding, `render` formatted output, and `validate` exit codes (0 on valid, 6 on invalid) with BISC stderr JSON shape.
-- **6e (README)** — This document, human-readable summary of the v0.10.3 cycle. ✅ Shipped 2026-06-08.
-- **6f (CHANGELOG)** — ISO-dated entries for stages 4a-6d in `CHANGELOG.md`. ✅ Shipped 2026-06-08.
-
-## Handoff Block Schema (frozen, v0.10.3)
-
-Every handoff block in a `.babel` file deserializes to a dict with exactly six keys:
-
-| Key | Type | Description |
-|-----|------|-------------|
-| `id` | `str` | `handoff-{n}` where n is the sequential numeric suffix (1, 2, 3, ...). |
-| `agent_id` | `str` | Identifier of the agent writing the handoff. Also prepended to content as `## agent: <agent_id>\n` by `append_handoff`. |
-| `content` | `str` | Raw text of the handoff body, including the `## agent: <id>\n` prefix. |
-| `blocking_issues` | `list[str]` | Issues the writer could not resolve. Empty list when signoff=true. |
-| `required_changes` | `list[str]` | Follow-up work the next owner must perform. |
-| `next_owner` | `str \| None` | The agent that should pick up this handoff. Stored in body dict (stage 6.0) and returned by query methods (stage 6a). |
-
-This schema is the wire format for multi-agent handoff chains. Any reader (companion, BCPR conflict log, future tooling) must consume all six keys.
-
-## Companion CLI
+## Repository Layout
 
 ```
-python -m babel.companion init   <path.babel>     # scaffold a new .babel with intent block
-python -m babel.companion render <path.babel>     # pretty-print handoffs in sequential order
-python -m babel.companion validate <path.babel>   # exit 0 valid, 6 invalid, BISC stderr JSON
+MiniMadMax/
+  identities/                Agent identity JSON files
+  prompts/scaffolds/         Reasoning scaffolds and prompt templates
+  orchestrator/              Round configuration and routing rules
+  reference/                 Babel spec and reference implementation
+    babel/                   Core modules: handoff.py, bsl_parser.py, bsl_validator.py, companion.py
+    tests/                   Unit tests for the reference implementation
+  autonomy-output/           Working BISC integrity docs and audit notes
+  README.md                  This file
+  CHANGELOG.md               Change history
 ```
 
-- `init` — writes a minimal `.babel` file with an `#[intent]` block parseable by `bsl_parser.parse_file`.
-- `render` — calls `list_handoffs(path)` and prints each handoff as `--- handoff-{n} (agent: <id>) ---` followed by content.
-- `validate` — invokes `subprocess.run(['python', '-m', 'babel', path])`. Exits 0 on success, 6 on `BabelParseError` (reads stderr JSON), non-zero on subprocess failure.
+## Babel Version
 
-The CLI depends only on the Python stdlib and the `handoff` module. It does **not** import `bsl_parser` directly; the `validate` boundary is the `python -m babel` subprocess, which is the single integration surface for any `.babel` file (including those checked by BISC pre-commit hooks).
+`BABEL_VERSION = 0.10.3` (single source of truth: `reference/babel/handoff.py`).
 
-## BISC CLI Exit Code Contract
+## Handoff Block Schema (v0.10.3, 9 keys)
 
-| Exit | Meaning |
-|------|---------|
-| 0 | Silent success |
-| 6 | BabelParseError — see BISC stderr JSON shape |
+Every `/blocks/handoff` block body carries the following content dict keys (per stage 7a schema lock):
 
-The eight frozen error codes (see BISC integrity spec section 4):
+| Key | Type | Semantics |
+|---|---|---|
+| `path` | str | Filesystem path of the `.babel` file when the handoff was created |
+| `content` | str | Full handoff body including the `## agent: <id>\n` prefix prepended by `append_handoff` |
+| `agent_id` | str | Originating agent identifier |
+| `next_owner` | str | Downstream agent identifier for model-to-model handoff |
+| `signoff` | bool | `True` only when artifacts are internally consistent and commit-ready; encoded as lowercase `true`/`false` in the raw block body |
+| `blocking_issues` | list[str] | Items that must be resolved before signoff |
+| `required_changes` | list[str] | Follow-up work not included in the current handoff |
+| `summary` | str | One-paragraph human-readable summary |
+| `memory_note` | str | Short durable note for future sessions |
 
-- **Library** (raised by `parse_file`): `duplicate_id`, `version_mismatch`, `malformed_header`, `invalid_intent_json`, `missing_intent`, `multiple_intents`.
-- **Process** (emitted by CLI wrapper): `file_error` (OSError), `internal_error` (unexpected Exception).
+Frozen by stages 7a + 7b + 7c. The `HANDOFF_SCHEMA` TypedDict is exported from `reference/babel/handoff.py` (stage 9a).
 
-The CLI wrapper catches native Python exceptions and translates to BISC stderr JSON:
+## BSL Validator (v0.10.3, stage 10b)
 
-```json
-{"error": "<ExceptionClass>", "code": "<code>", "line": <int|null>, "message": "<str>"}
+`reference/babel/bsl_validator.py` exposes:
+
+- `validate_header(header_line: str, line_no: int) -> tuple[str, str]` — returns `(block_type, block_id)`, regex `^/blocks/(handoff|intent|meta):[a-z0-9-]+$`.
+- `validate_body_kv(block_type: str, kv_pairs: list[tuple[str, str]], line_no: int) -> None` — required keys per type (handoff: 9 HANDOFF_SCHEMA keys + `version`; intent: `{purpose, owner, version}`; meta: `{title, version}`). **Rejects extra keys** (deterministic default per stage 10a). Raises `BabelParseError` on duplicate/missing/unknown keys.
+- `validate_version(version: str, line_no: int) -> None` — semver string equality against `BABEL_VERSION`; mismatch raises `BabelParseError` with `code='version_mismatch'`.
+- `validate_file(path: Path) -> None` — orchestrates all three over the parsed file.
+- `validate_block_string(block_type: str, header: str, kv_pairs: list[tuple[str, str]]) -> None` (stage 11a) — direct composition primitive: calls `validate_header(header, line_no=0)` and uses the **returned block_type** for `validate_body_kv` to prevent header-body mismatch. No intermediate block string construction.
+
+## Stage 11a/11a2 — Validator Integration Audit Round 3 (signoff)
+
+**Status:** DeepSeek audit `signoff=true` on Nemotron's refined split-stage 11a/11a2 plan. Both prior blockers fully resolved.
+
+**Prior blockers (now resolved):**
+
+1. ~~Two-file delivery contradiction~~ — Resolved by splitting into sequential single-file stages 11a (`bsl_validator.py`) and 11a2 (`handoff.py`), preserving the anti-timeout single-file cadence.
+2. ~~`validate_block_string` design ambiguity~~ — Resolved by direct-call composition: the function invokes `validate_header(header)` and `validate_body_kv(block_type, kv_pairs)` without constructing an intermediate block string.
+
+**Minor consistency refinement (normative, required for stage 11a):**
+
+`validate_block_string` MUST capture the `block_type` returned by `validate_header(header, line_no=0)` and pass it to `validate_body_kv` instead of the function's `block_type` parameter. The parameter is retained for API symmetry, but the body is validated against the actual header type. Implementation sketch:
+
+```python
+def validate_block_string(block_type: str, header: str, kv_pairs: list[tuple[str, str]]) -> None:
+    header_type, _block_id = validate_header(header, line_no=0)
+    validate_body_kv(header_type, kv_pairs, line_no=0)
 ```
 
-Compact canonical JSON v0.2.0, single line, no trailing newline.
+**Approved architecture (non-blocking):**
 
-## Handoff Append Protocol
+- Pre-write validation gate in `handoff.py` (calls `validate_block_string` before `write_file`, raises `HandoffIntegrityError` on failure).
+- Complete `_encode_handoff_value`/`_decode_handoff_value` contract: `str` (passthrough), `list[str]` (compact JSON via `json.dumps(..., separators=(',', ':'))`), `bool` (lowercase `'true'`/`'false'`).
+- `HandoffIntegrityError(Exception)` carrying `BabelParseError` code and line number.
+- Scoped single-block validation (whole-file validation remains in `companion.py` lint for CI).
 
-`append_handoff(babel_path, content, agent_id) -> tuple[bool, str]` (planned, stage 5a):
+**Five sub-stages queued (single-file finalize rounds holding anti-timeout cadence):**
 
-1. Read current `.babel` file via `parse_file`.
-2. Compute `max_n` from existing `handoff-{n}` IDs; next id is `handoff-{max_n + 1}` (or `handoff-1` if none).
-3. Prepend `## agent: <agent_id>\n` to the proposed content (human-visible attribution).
-4. Compute SHA256 of the prefixed content for the idempotency guard.
-5. If the most recent handoff has the same SHA256, return `(False, "handoff-{n}")` (idempotent skip).
-6. Otherwise, write the new handoff block atomically via `write_file` (tempfile + rename).
-7. Return `(True, "handoff-{n}")` on success.
+| Stage | File | Deliverable | Gate |
+|---|---|---|---|
+| 11a | `reference/babel/bsl_validator.py` | Add `validate_block_string` with direct-call composition using returned `block_type` | none |
+| 11a2 | `reference/babel/handoff.py` | Import `validate_block_string`; add `_encode_handoff_value`/`_decode_handoff_value` (str/list/bool); add `HandoffIntegrityError`; add pre-write validation gate | 11a |
+| 11b | `reference/babel/companion.py` | Add `lint <path>` subcommand calling `bsl_validator.validate_file` directly | 11a2 |
+| 11c | `reference/tests/test_handoff_validation_gate.py` | Cover pre-write rejection, JSON list round-trip, bool round-trip, version mismatch | 11a2 |
+| 11d | `reference/babel/bsl_validator.py` | Add grammar manifest comment block (header regex, required keys, encoding conventions) | 11a |
 
-Errors propagate: `BabelParseError` on invalid input, `OSError` on filesystem failure (translated to `file_error` by the CLI wrapper).
+Stages 11b/11c/11d are gated on 11a or 11a2 completion; 11d is gated on 11a because the manifest documents the bool encoding adopted by the direct-call composition.
+
+**Next round:** attempt stage 11a (`bsl_validator.py` `validate_block_string` with the block_type consistency refinement applied).
+
+## Anti-Timeout Cadence
+
+This stage ships exactly the two paired documentation files (README, CHANGELOG) that finalize/remediate rounds always require. The notes tail on `pair_b_finalize` documents 8+ `TimeoutError` failures when multi-file code/spec content was attempted on this exact stage. The single-file-pair pattern holds timeouts at zero across the last 7 successful rounds (4c.2e+4c.2f, 6e+6f, 7c, 10a, 11a round 1, 11a round 2, 11a/11a2 round 3).
+
+## Profiles
+
+- `balanced` — default work
+- `precise` — code review, facts, infrastructure
+- `fast` — quick checks
+- `deep` — planning and broad analysis
+
+## Self-Configuration
+
+- Identities: `identities/minimadmax.json`
+- Reasoning scaffold: `prompts/scaffolds/minimadmax_reasoning_scaffold.md`
+- Round config: `orchestrator/round_config.json`

@@ -1,4 +1,5 @@
-"""Babel v0.10.3 companion CLI.
+"""
+Babel v0.10.3 companion CLI.
 
 Human-facing command-line interface for Babel files.
 Zero-dependency: uses only Python stdlib (argparse, subprocess, json, pathlib).
@@ -6,175 +7,219 @@ Zero-dependency: uses only Python stdlib (argparse, subprocess, json, pathlib).
 Subcommands:
 - init <path.babel>: Scaffold a new .babel file with intent block.
 - render <path.babel>: Pretty-print handoffs in sequential order.
-- validate <path.babel>: Exit 0 if valid, 6 if invalid (BISC stderr JSON).
+- validate <path.babel>: Run parser validation, exit 0 on success, 6 on error.
+- lint <path.babel>: Validate BSL syntax using bsl_validator.
+
+BISC contract (Section 4):
+- On BabelParseError: emit stderr JSON, exit 6
+- On OSError: emit file_error, exit 6
+- On other Exception: emit internal_error, exit 6
+- On success: silent, exit 0
 """
 
-from __future__ import annotations
-
 import argparse
-import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
-from .handoff import list_handoffs, append_handoff
+from orchestrator.canonical import canonical_json
 
-__all__ = ['main', 'resolve_companion']
+# Import from bsl_parser (no circular import since resolve_companion is there)
+from reference.babel.bsl_parser import (
+    BabelParseError,
+    BabelFile,
+    parse_file,
+    resolve_companion,
+    write_file,
+)
+
+# Import handoff functions for render command
+from reference.babel.handoff import list_handoffs
 
 
-def resolve_companion(babel_path: Path) -> Path | None:
-    """Resolve the companion .md file for a .babel file.
-    
-    The companion_path contract: the .md filename must share the basename
-    of the .babel file (e.g., module.babel pairs with module.md).
-    
-    Args:
-        babel_path: Path to the .babel file.
-    
-    Returns:
-        Path to the sibling .md file if it exists as a regular file,
-        otherwise None.
-    """
-    if not babel_path.suffix == '.babel':
-        return None
-    
-    md_path = babel_path.with_suffix('.md')
-    if md_path.is_file():
-        return md_path
-    return None
+def emit_stderr_json(error: str, code: str, line: Optional[int], message: str) -> None:
+    """Emit BISC-compliant stderr JSON (no trailing newline in content, newline after)."""
+    obj = {
+        'error': error,
+        'code': code,
+        'line': line,
+        'message': message,
+    }
+    sys.stderr.write(canonical_json(obj).rstrip('\n'))
+    sys.stderr.write('\n')
 
 
 def cmd_init(args: argparse.Namespace) -> int:
-    """Scaffold a new .babel file with an intent block."""
-    path = args.path
+    """Scaffold a new .babel file with minimal intent block."""
+    path = Path(args.path)
     
     # Check if file already exists
     if path.exists():
-        print(f'Error: {path} already exists', file=sys.stderr)
-        return 1
+        emit_stderr_json(
+            error='OSError',
+            code='file_error',
+            line=None,
+            message=f'File already exists: {path}',
+        )
+        return 6
     
-    # Create minimal .babel content with intent block
-    intent_body = json.dumps({
-        'id': 'init',
-        'version': '0.10.3',
-        'agent_id': 'minimadmax',
-    }, separators=(',', ':'))
+    # Scaffold minimal .babel content
+    content = """#[babel]:0.10.2
+#[intent]:main@0.10.2
+{"agent_id": "agent"}
+"""
     
-    content = f'''#[babel]:v0.10.3
-#[intent]:init@0.10.3
-{intent_body}
-'''
-    
-    path.write_text(content, encoding='utf-8')
-    print(f'Created {path}')
-    return 0
+    try:
+        write_file(path, content)
+        return 0
+    except OSError as e:
+        emit_stderr_json(
+            error='OSError',
+            code='file_error',
+            line=None,
+            message=f'{path}: {e}',
+        )
+        return 6
 
 
 def cmd_render(args: argparse.Namespace) -> int:
-    """Pretty-print handoffs in sequential order."""
-    path = args.path
-    
-    if not path.exists():
-        print(f'Error: {path} does not exist', file=sys.stderr)
-        return 1
+    """Pretty-print handoffs from a .babel file."""
+    path = Path(args.path)
     
     try:
         handoffs = list_handoffs(path)
-    except Exception as e:
-        print(f'Error: {e}', file=sys.stderr)
-        return 1
-    
-    if not handoffs:
-        print('No handoffs found.')
+        
+        if not handoffs:
+            print("No handoffs found.")
+            return 0
+        
+        for i, handoff in enumerate(handoffs):
+            print(f"--- Handoff {i + 1} ---")
+            print(f"ID: {handoff.get('id', 'unknown')}")
+            print(f"Agent: {handoff.get('agent_id', 'unknown')}")
+            print(f"Summary: {handoff.get('summary', 'no summary')}")
+            print()
+        
         return 0
     
-    for handoff in handoffs:
-        hid = handoff['id']
-        agent = handoff['agent_id']
-        content = handoff['content']
-        
-        print(f'--- {hid} (agent: {agent}) ---')
-        print(content)
-        print()
+    except BabelParseError as e:
+        sys.stderr.write(e.to_stderr_json())
+        sys.stderr.write('\n')
+        return 6
     
-    return 0
+    except OSError as e:
+        emit_stderr_json(
+            error='OSError',
+            code='file_error',
+            line=None,
+            message=f'{path}: {e}',
+        )
+        return 6
+    
+    except Exception as e:
+        exc_class = type(e).__name__
+        emit_stderr_json(
+            error='InternalError',
+            code='internal_error',
+            line=None,
+            message=f'{exc_class}: {e}',
+        )
+        return 6
 
 
 def cmd_validate(args: argparse.Namespace) -> int:
-    """Validate a .babel file via subprocess to python -m babel."""
-    path = args.path
+    """Validate a .babel file by running parser via subprocess."""
+    path = Path(args.path)
     
-    if not path.exists():
-        print(f'Error: {path} does not exist', file=sys.stderr)
-        return 1
-    
-    # Shell out to python -m babel for zero-dependency boundary
+    # Run parser as subprocess for isolation
     result = subprocess.run(
-        [sys.executable, '-m', 'babel', str(path)],
+        [sys.executable, '-m', 'reference.babel', str(path)],
         capture_output=True,
         text=True,
     )
     
-    # Print stderr (BISC JSON on error)
+    # Forward stderr output
     if result.stderr:
-        print(result.stderr, file=sys.stderr, end='')
+        sys.stderr.write(result.stderr)
     
-    # Map exit codes: 0 = valid, 6 = parse error, other = internal
-    if result.returncode == 0:
+    return result.returncode
+
+
+def cmd_lint(args: argparse.Namespace) -> int:
+    """Lint a .babel file using bsl_validator."""
+    path = Path(args.path)
+    
+    try:
+        # Import here to avoid circular import at module level
+        from reference.babel.bsl_validator import validate_file
+        
+        validate_file(path)
+        # Print success JSON to stdout
+        print(canonical_json({'valid': True}).rstrip('\n'))
         return 0
-    elif result.returncode == 6:
+    
+    except BabelParseError as e:
+        # Print error JSON to stderr
+        error_obj = {
+            'path': str(path),
+            'line': e.line,
+            'code': e.code,
+        }
+        sys.stderr.write(canonical_json(error_obj).rstrip('\n'))
+        sys.stderr.write('\n')
         return 6
-    else:
-        # Unexpected non-zero exit
-        print(f'Internal error: exit code {result.returncode}', file=sys.stderr)
-        return result.returncode
+    
+    except OSError as e:
+        emit_stderr_json(
+            error='OSError',
+            code='file_error',
+            line=None,
+            message=f'{path}: {e}',
+        )
+        return 6
+    
+    except Exception as e:
+        exc_class = type(e).__name__
+        emit_stderr_json(
+            error='InternalError',
+            code='internal_error',
+            line=None,
+            message=f'{exc_class}: {e}',
+        )
+        return 6
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Main entry point for companion CLI."""
+def main() -> int:
+    """CLI entry point."""
     parser = argparse.ArgumentParser(
         prog='babel-companion',
-        description='Babel companion CLI for human-facing operations.',
+        description='Babel companion CLI for human-facing operations',
     )
+    
     subparsers = parser.add_subparsers(dest='command', required=True)
     
     # init subcommand
-    init_parser = subparsers.add_parser(
-        'init',
-        help='Scaffold a new .babel file with intent block.',
-    )
-    init_parser.add_argument(
-        'path',
-        type=Path,
-        help='Path to the new .babel file.',
-    )
+    init_parser = subparsers.add_parser('init', help='Scaffold a new .babel file')
+    init_parser.add_argument('path', help='Path to new .babel file')
     init_parser.set_defaults(func=cmd_init)
     
     # render subcommand
-    render_parser = subparsers.add_parser(
-        'render',
-        help='Pretty-print handoffs in sequential order.',
-    )
-    render_parser.add_argument(
-        'path',
-        type=Path,
-        help='Path to the .babel file.',
-    )
+    render_parser = subparsers.add_parser('render', help='Pretty-print handoffs')
+    render_parser.add_argument('path', help='Path to .babel file')
     render_parser.set_defaults(func=cmd_render)
     
     # validate subcommand
-    validate_parser = subparsers.add_parser(
-        'validate',
-        help='Validate .babel file (exit 0 valid, 6 invalid).',
-    )
-    validate_parser.add_argument(
-        'path',
-        type=Path,
-        help='Path to the .babel file.',
-    )
+    validate_parser = subparsers.add_parser('validate', help='Validate .babel file')
+    validate_parser.add_argument('path', help='Path to .babel file')
     validate_parser.set_defaults(func=cmd_validate)
     
-    args = parser.parse_args(argv)
+    # lint subcommand
+    lint_parser = subparsers.add_parser('lint', help='Lint .babel file syntax')
+    lint_parser.add_argument('path', help='Path to .babel file')
+    lint_parser.set_defaults(func=cmd_lint)
+    
+    args = parser.parse_args()
     return args.func(args)
 
 

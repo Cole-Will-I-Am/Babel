@@ -27,6 +27,15 @@ from .bwcc import (
     CascadeResult,
 )
 
+from .manifest import (
+    ManifestError,
+    compute_basis_ref,
+    validate_manifest_chain,
+    MANIFEST_BASIS_MISMATCH,
+    MANIFEST_INVALID_BASIS_REF,
+    MANIFEST_MISSING_PREDECESSOR,
+)
+
 __version__ = "0.9.0"
 __all__ = [
     "WorkflowValidator",
@@ -42,4 +51,10 @@ __all__ = [
     "ValidationResult",
     "AmendmentChainResult",
     "CascadeResult",
+    "ManifestError",
+    "compute_basis_ref",
+    "validate_manifest_chain",
+    "MANIFEST_BASIS_MISMATCH",
+    "MANIFEST_INVALID_BASIS_REF",
+    "MANIFEST_MISSING_PREDECESSOR",
 ]

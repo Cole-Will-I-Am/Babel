@@ -1,269 +1,228 @@
-"""
-Babel v0.9.0 Manifest Hash Computation Reference Implementation
+"""Babel v0.10.3 Manifest Basis Reference Computation.
 
-Implements the manifest finalization logic from scripts/compute-manifest-sha256.py
-but uses orchestrator/canonical.py for v0.2.0 canonical serialization.
+Implements basis_ref hash computation for manifest chain validation.
+Reuses orchestrator/canonical.py for v0.2.0 canonical JSON serialization.
 
-Exit codes (aligned with v0.6.0 AIC convention):
-  0 = success, manifest rewritten with computed hashes
-  1 = validation failure (placeholder base, basis_ref mismatch, malformed)
-  2 = missing manifest or artifact file
-  3 = IO error during rewrite
+Exports:
+- ManifestError: exception class with code, version, path attributes
+- compute_basis_ref(manifest_path: Path) -> str: compute predecessor hash
+- MANIFEST_BASIS_MISMATCH: error code for hash mismatch
+- MANIFEST_INVALID_BASIS_REF: error code for malformed basis_ref
+- MANIFEST_MISSING_PREDECESSOR: error code for missing predecessor manifest
 """
-import os
-import sys
-import json
+
 import hashlib
-from typing import Dict, List, Tuple, Optional, Any
+import json
+import re
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 from orchestrator.canonical import canonical_json, canonical_sha256
 
 
-PLACEHOLDER_PREFIX = "sha256:PENDING"
+# Error codes per manifest validation spec
+MANIFEST_BASIS_MISMATCH = "MANIFEST_BASIS_MISMATCH"
+MANIFEST_INVALID_BASIS_REF = "MANIFEST_INVALID_BASIS_REF"
+MANIFEST_MISSING_PREDECESSOR = "MANIFEST_MISSING_PREDECESSOR"
+
+# Regex pattern for basis_ref: sha256:[0-9a-f]{64}
+BASIS_REF_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
-class ManifestHasher:
+class ManifestError(Exception):
+    """Structured manifest error with deterministic JSON output."""
+
+    def __init__(
+        self,
+        code: str,
+        version: str,
+        path: Optional[str] = None,
+        expected: Optional[str] = None,
+        actual: Optional[str] = None,
+    ):
+        self.code = code
+        self.version = version
+        self.path = path
+        self.expected = expected
+        self.actual = actual
+        super().__init__(code)
+
+    def to_json(self) -> str:
+        """Return deterministic JSON error object."""
+        return json.dumps(
+            {
+                "code": self.code,
+                "version": self.version,
+                "path": self.path,
+                "expected": self.expected,
+                "actual": self.actual,
+            },
+            sort_keys=True,
+            indent=2,
+        )
+
+
+def compute_basis_ref(manifest_path: Path) -> str:
     """
-    Computes and validates manifest hashes for Babel v0.9.0 freeze.
-    
-    Uses orchestrator/canonical.py for v0.2.0 canonical serialization:
-    - NFC unicode normalization
-    - LF line endings (no CR)
-    - Sorted keys in JSON
-    - Deterministic number serialization
-    - Single LF terminator
+    Compute the basis_ref (predecessor hash) for a manifest.
+
+    Loads the manifest at manifest_path, extracts basis_target,
+    computes canonical_sha256 of the predecessor manifest, and returns
+    the computed hash.
+
+    Args:
+        manifest_path: Path to the manifest file.
+
+    Returns:
+        The computed SHA-256 hash of the predecessor manifest.
+
+    Raises:
+        ManifestError: On validation failure (missing predecessor,
+            invalid basis_ref format, hash mismatch).
+        FileNotFoundError: If manifest_path does not exist.
     """
-    
-    def __init__(self, repo_root: str = "."):
-        self.repo_root = repo_root
-    
-    def compute_basis_ref(self, base_manifest_path: str) -> Tuple[bool, Optional[str], str]:
-        """
-        Compute basis_ref from frozen base manifest.
-        
-        Returns:
-            (success, error_code, result_or_message)
-            On success: (True, None, "sha256:hex64")
-            On failure: (False, error_code, error_message)
-        """
-        if not os.path.exists(base_manifest_path):
-            return (False, "MANIFEST_MISSING", f"Base manifest not found: {base_manifest_path}")
-        
-        try:
-            hash_result = canonical_sha256(base_manifest_path)
-            return (True, None, hash_result)
-        except OSError as exc:
-            return (False, "MANIFEST_IO_ERROR", f"Failed to read base manifest: {exc}")
-        except ValueError as exc:
-            return (False, "MANIFEST_INVALID", f"Invalid base manifest: {exc}")
-    
-    def validate_base_manifest(self, base_manifest_path: str) -> Tuple[bool, Optional[str], str]:
-        """
-        Validate that base manifest has no placeholder hashes.
-        
-        A frozen base must be fully hashed; we never derive a basis_ref
-        from a placeholder base.
-        
-        Returns:
-            (success, error_code, message)
-        """
-        if not os.path.exists(base_manifest_path):
-            return (False, "MANIFEST_MISSING", f"Base manifest not found: {base_manifest_path}")
-        
-        try:
-            with open(base_manifest_path, "rb") as f:
-                raw = f.read()
-            obj = json.loads(raw.decode("utf-8"))
-        except (OSError, ValueError) as exc:
-            return (False, "MANIFEST_IO_ERROR", f"Failed to read base manifest: {exc}")
-        
-        artifacts = obj.get("artifacts", [])
-        for entry in artifacts:
-            cs = entry.get("canonical_sha256", "")
-            if not cs or cs.startswith(PLACEHOLDER_PREFIX):
-                path = entry.get("path", "<unknown>")
-                return (False, "BASE_PLACEHOLDER", 
-                        f"Base manifest has placeholder canonical_sha256 for {path}")
-        
-        return (True, None, "Base manifest validated")
-    
-    def validate_basis_ref(self, target_manifest_path: str, base_manifest_path: str) -> Tuple[bool, Optional[str], str]:
-        """
-        Validate or populate basis_ref in target manifest.
-        
-        Returns:
-            (success, error_code, basis_ref_or_error_message)
-        """
-        # Compute expected basis_ref from base
-        success, error_code, computed_basis = self.compute_basis_ref(base_manifest_path)
-        if not success:
-            return (False, error_code, computed_basis)
-        
-        # Load target manifest
-        if not os.path.exists(target_manifest_path):
-            return (False, "MANIFEST_MISSING", f"Target manifest not found: {target_manifest_path}")
-        
-        try:
-            with open(target_manifest_path, "rb") as f:
-                raw = f.read()
-            obj = json.loads(raw.decode("utf-8"))
-        except (OSError, ValueError) as exc:
-            return (False, "MANIFEST_IO_ERROR", f"Failed to read target manifest: {exc}")
-        
-        stated_basis = obj.get("basis_ref", "")
-        
-        # If placeholder or empty, populate with computed
-        if not stated_basis or stated_basis.startswith(PLACEHOLDER_PREFIX):
-            return (True, None, computed_basis)
-        
-        # If stated, must match computed
-        if stated_basis != computed_basis:
-            return (False, "BASIS_REF_MISMATCH",
-                    f"basis_ref mismatch: manifest={stated_basis} computed={computed_basis}")
-        
-        return (True, None, stated_basis)
-    
-    def compute_artifact_hashes(self, target_manifest_path: str) -> Tuple[bool, Optional[str], List[Dict[str, Any]]]:
-        """
-        Recompute canonical_sha256 for every artifact entry.
-        
-        Returns:
-            (success, error_code, updated_artifacts_list)
-        """
-        if not os.path.exists(target_manifest_path):
-            return (False, "MANIFEST_MISSING", f"Target manifest not found: {target_manifest_path}")
-        
-        try:
-            with open(target_manifest_path, "rb") as f:
-                raw = f.read()
-            obj = json.loads(raw.decode("utf-8"))
-        except (OSError, ValueError) as exc:
-            return (False, "MANIFEST_IO_ERROR", f"Failed to read target manifest: {exc}")
-        
-        artifacts = obj.get("artifacts", [])
-        updated = []
-        
-        for entry in artifacts:
-            rel_path = entry.get("path", "")
-            if not rel_path:
-                return (False, "ARTIFACT_MISSING_PATH", "Artifact entry missing path")
-            
-            full_path = os.path.join(self.repo_root, rel_path)
-            if not os.path.exists(full_path):
-                return (False, "ARTIFACT_MISSING", f"Missing artifact file: {rel_path}")
-            
-            try:
-                hash_result = canonical_sha256(full_path)
-            except (OSError, ValueError) as exc:
-                return (False, "ARTIFACT_IO_ERROR", f"Read failed for {rel_path}: {exc}")
-            
-            # Update entry with computed hash
-            updated_entry = dict(entry)
-            updated_entry["canonical_sha256"] = hash_result
-            updated.append(updated_entry)
-        
-        return (True, None, updated)
-    
-    def atomic_rewrite(self, target_manifest_path: str, updated_obj: Dict[str, Any]) -> Tuple[bool, Optional[str], str]:
-        """
-        Atomically rewrite manifest via temp+replace.
-        
-        Returns:
-            (success, error_code, message)
-        """
-        try:
-            canon_text = canonical_json(updated_obj)
-            new_bytes = canon_text.encode("utf-8")
-        except (TypeError, ValueError) as exc:
-            return (False, "CANONICALIZE_ERROR", f"Failed to canonicalize manifest: {exc}")
-        
-        tmp_path = target_manifest_path + ".tmp"
-        
-        try:
-            with open(tmp_path, "wb") as f:
-                f.write(new_bytes)
-            os.replace(tmp_path, target_manifest_path)
-        except OSError as exc:
-            # Clean up temp file if it exists
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
-            return (False, "REWRITE_IO_ERROR", f"Atomic rewrite failed: {exc}")
-        
-        return (True, None, f"Manifest rewritten: {target_manifest_path}")
-    
-    def finalize_manifest(self, target_version: str = "0.9.0", 
-                          base_version: str = "0.8.1") -> Tuple[int, str]:
-        """
-        Full manifest finalization workflow.
-        
-        Returns:
-            (exit_code, message)
-            0 = success
-            1 = validation failure
-            2 = missing file
-            3 = IO error
-        """
-        target_path = os.path.join(self.repo_root, "autonomy-output",
-                                   f"babel-manifest-v{target_version}.json")
-        base_path = os.path.join(self.repo_root, "autonomy-output",
-                                 f"babel-manifest-v{base_version}.json")
-        
-        # Gate 1: validate base manifest (no placeholders)
-        success, error_code, message = self.validate_base_manifest(base_path)
-        if not success:
-            if error_code == "MANIFEST_MISSING":
-                return (2, f"ERROR: missing base manifest: {base_path}")
-            return (1, f"ERROR: base manifest validation failed: {message}")
-        
-        # Gate 2: validate/populate basis_ref
-        success, error_code, basis_ref = self.validate_basis_ref(target_path, base_path)
-        if not success:
-            if error_code == "MANIFEST_MISSING":
-                return (2, f"ERROR: missing target manifest: {target_path}")
-            return (1, f"ERROR: basis_ref validation failed: {basis_ref}")
-        
-        # Gate 3: compute artifact hashes
-        success, error_code, updated_artifacts = self.compute_artifact_hashes(target_path)
-        if not success:
-            if error_code in ("MANIFEST_MISSING", "ARTIFACT_MISSING"):
-                return (2, f"ERROR: {updated_artifacts if isinstance(updated_artifacts, str) else error_code}")
-            return (1, f"ERROR: artifact hash computation failed: {updated_artifacts if isinstance(updated_artifacts, str) else error_code}")
-        
-        # Load full target manifest for rewrite
-        try:
-            with open(target_path, "rb") as f:
-                raw = f.read()
-            target_obj = json.loads(raw.decode("utf-8"))
-        except (OSError, ValueError) as exc:
-            return (3, f"ERROR: failed to load target manifest: {exc}")
-        
-        # Update manifest
-        target_obj["basis_ref"] = basis_ref
-        target_obj["artifacts"] = updated_artifacts
-        if not target_obj.get("generated_at"):
-            target_obj["generated_at"] = "1970-01-01T00:00:00Z"
-        
-        # Atomic rewrite
-        success, error_code, message = self.atomic_rewrite(target_path, target_obj)
-        if not success:
-            return (3, f"ERROR: {message}")
-        
-        return (0, f"OK: basis_ref={basis_ref}; {len(updated_artifacts)} artifact hashes computed")
+    # Load manifest
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        manifest = json.load(f)
+
+    version = manifest.get("version", "unknown")
+    basis_ref = manifest.get("basis_ref")
+    basis_target = manifest.get("basis_target")
+
+    # Genesis (v0.1.0) has no basis_ref
+    if basis_ref is None:
+        if version == "v0.1.0":
+            # Genesis is valid with null basis_ref
+            return ""
+        else:
+            # Non-genesis without basis_ref is invalid
+            raise ManifestError(
+                code=MANIFEST_INVALID_BASIS_REF,
+                version=version,
+                path=str(manifest_path),
+                expected="sha256:[0-9a-f]{64}",
+                actual="null/missing",
+            )
+
+    # Validate basis_ref format
+    if not BASIS_REF_PATTERN.match(basis_ref):
+        raise ManifestError(
+            code=MANIFEST_INVALID_BASIS_REF,
+            version=version,
+            path=str(manifest_path),
+            expected="sha256:[0-9a-f]{64}",
+            actual=basis_ref,
+        )
+
+    # Check predecessor exists
+    if not basis_target:
+        raise ManifestError(
+            code=MANIFEST_MISSING_PREDECESSOR,
+            version=version,
+            path=str(manifest_path),
+            expected="basis_target present",
+            actual="null/missing",
+        )
+
+    # Compute predecessor path
+    base_dir = manifest_path.parent
+    predecessor_path = base_dir / f"babel-manifest-{basis_target}.json"
+
+    if not predecessor_path.exists():
+        raise ManifestError(
+            code=MANIFEST_MISSING_PREDECESSOR,
+            version=version,
+            path=str(predecessor_path),
+        )
+
+    # Compute hash using Path object (not string)
+    computed_hash = canonical_sha256(predecessor_path)
+
+    # Verify hash matches basis_ref
+    if computed_hash != basis_ref:
+        raise ManifestError(
+            code=MANIFEST_BASIS_MISMATCH,
+            version=version,
+            path=str(manifest_path),
+            expected=basis_ref,
+            actual=computed_hash,
+        )
+
+    return computed_hash
 
 
-def main():
-    """CLI entry point matching scripts/compute-manifest-sha256.py behavior."""
-    repo_root = os.environ.get("BABEL_REPO_ROOT", ".")
-    hasher = ManifestHasher(repo_root)
-    exit_code, message = hasher.finalize_manifest()
-    if exit_code != 0:
-        sys.stderr.write(message + "\n")
-    else:
-        sys.stdout.write(message + "\n")
-    return exit_code
+def validate_manifest_chain(
+    start_path: Path, base_dir: Optional[Path] = None
+) -> bool:
+    """
+    Validate an entire manifest chain from start_path back to genesis.
 
+    Args:
+        start_path: Path to the starting manifest.
+        base_dir: Base directory for manifest discovery (defaults to start_path.parent).
 
-if __name__ == "__main__":
-    sys.exit(main())
+    Returns:
+        True if chain is valid.
+
+    Raises:
+        ManifestError: On any validation failure.
+    """
+    if base_dir is None:
+        base_dir = start_path.parent
+
+    current_path = start_path
+    visited: set[str] = set()
+
+    while True:
+        # Prevent infinite loops
+        current_str = str(current_path)
+        if current_str in visited:
+            raise ManifestError(
+                code=MANIFEST_INVALID_BASIS_REF,
+                version="unknown",
+                path=current_str,
+                expected="acyclic chain",
+                actual="cycle detected",
+            )
+        visited.add(current_str)
+
+        # Load and validate
+        with open(current_path, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+
+        version = manifest.get("version", "unknown")
+        basis_ref = manifest.get("basis_ref")
+        basis_target = manifest.get("basis_target")
+
+        # Genesis check
+        if basis_ref is None:
+            if version != "v0.1.0":
+                raise ManifestError(
+                    code=MANIFEST_INVALID_BASIS_REF,
+                    version=version,
+                    path=str(current_path),
+                    expected="sha256:[0-9a-f]{64}",
+                    actual="null/missing",
+                )
+            # Valid genesis
+            return True
+
+        # Compute and verify hash
+        compute_basis_ref(current_path)
+
+        # Move to predecessor
+        if not basis_target:
+            raise ManifestError(
+                code=MANIFEST_MISSING_PREDECESSOR,
+                version=version,
+                path=str(current_path),
+            )
+
+        current_path = base_dir / f"babel-manifest-{basis_target}.json"
+
+        if not current_path.exists():
+            raise ManifestError(
+                code=MANIFEST_MISSING_PREDECESSOR,
+                version=version,
+                path=str(current_path),
+            )
