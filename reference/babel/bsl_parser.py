@@ -136,7 +136,7 @@ def _scan_file(content: str) -> Tuple[List[BabelBlock], List[BabelBlock]]:
             i += 1
             continue
         
-        # Skip non-header lines (content lines)
+        # Check if this line starts with #[
         if not line.startswith('#['):
             i += 1
             continue
@@ -148,6 +148,7 @@ def _scan_file(content: str) -> Tuple[List[BabelBlock], List[BabelBlock]]:
             continue
         
         # Validate header format BEFORE attempting to parse content
+        # This must happen immediately after detecting #[ that isn't file header
         match = HEADER_REGEX.match(line)
         if not match:
             raise BabelParseError(

@@ -4,75 +4,126 @@ All notable changes to MiniMadMax and the Babel stack are recorded here.
 
 ## v0.10.3 -- Handoff Query + Companion CLI + BSL Validator (Unreleased)
 
-Read-side handoff query protocol, human-facing companion CLI, BSL syntax validator, validator integration into the handoff write path, grammar manifest, behavioral conformance test, doc sweep, BISC amendment, and write-serialization audit. Stages 9a/9b/10b/11a/11a2/11b/11d/11e/11f/12a/12b/12c/13.
+Read-side handoff query protocol, human-facing companion CLI, BSL syntax validator, and validator integration into the handoff write path. The grammar manifest is normative; the lint CLI contract is stable; the multi-agent append contract requires serialized writes.
 
-### 2026-06-08
+### 2026-06-08 -- Stage 13 read-query plan: signoff
 
-#### Stage 12b audit round 3: signoff=true
+- **Kimi** kicked off stage 13 read-query architecture after the 12b round-3 signoff, decoupled from pending 12a/12b write-side gating.
+- **Nemotron** refined the kickoff into an implementation-ready draft for single-file `reference/babel/query.py`: deterministic, immutable, versioned query interface over validated BSL AST.
+- **DeepSeek** audited the plan and signed off: no blockers. The architecture is sound, the API is clear, and the implementation can proceed independently of 12a/12b.
+- **Stage 13 finalize (this round, docs-only):** README and CHANGELOG record the audit approval and queue the implementation as the next single-file code round. Held the anti-timeout cadence that succeeded in 13+ prior rounds.
+- **Stage 13 queued (next round, single-file):** Author `reference/babel/query.py` with `select_handoffs(ast, *, agent_id=None, signoff=None) -> tuple[MappingProxyType, ...]`, `HandoffView` TypedDict extending `HANDOFF_SCHEMA` with `_line: int`, `_block_id: str`, `_query_protocol_version: Literal[1]`, and private helpers `_filter_by_agent_id` and `_filter_by_signoff_status`. Import `HANDOFF_SCHEMA` from `handoff.py` and `MappingProxyType` from `types`. Sort results by `_line` ascending.
+- **Stage 13a (deferred):** Document and enforce the validated-AST-only contract (raise `TypeError` on raw text or non-AST input).
+- **Stage 13b (deferred, single-file, gated on stage 13 commit):** Author `reference/tests/test_query.py` with behavioral assertions for deterministic ordering, `MappingProxyType` immutability, agent/signoff filtering, `query_protocol_version=1` presence, empty-input behavior, and combined filter intersection.
+- **Stage 12a (parallel, single-file):** BISC amendment patch queued as write-side prerequisite for 12b/12c, not gating stage 13.
+- **Stage 12b/12c (gated on 12a):** Sidecar lock-based `append_handoff` and concurrent-append test as approved in round 3.
+- **signoff=true** because the documentation pair is internally consistent, additive to the prior 12b round-3 docs surface, every claim is grounded in the audit chain, and the next artifact-writing stage can attempt stage 13 (query.py single-file) immediately.
 
-- **Kimi**: revised 12b kickoff adopting unified sidecar lock file (`<path>.babel.lock`) with `fcntl.flock(LOCK_EX)` to resolve the round-2 creation race by serializing both initial `.babel` creation and subsequent appends under the same lock.
-- **Nemotron**: implementation-ready refinement combining sidecar lock + generation counter (int in meta block) + atomic `temp-file + os.replace` + platform guard (`HandoffIntegrityError(code='platform_unsupported')` on non-POSIX) + creation-under-lock protocol (initial meta block with `generation=1`).
-- **DeepSeek**: audit signoff=true. No blockers. The architecture resolves all prior round-1 (generation counter insufficient for conflict-free) and round-2 (creation protocol missing) issues. Assumption noted: `fcntl.flock` requires local filesystem with proper lock support; network filesystems may not guarantee mutual exclusion.
-- **Implementation queue** (single-file stages, spec-first ordering):
-  1. **12a BISC patch** (immediate next, single-file, prerequisite): `autonomy-output/babel-bisc-integrity-v0.10.2.md` prepending `Effective v0.10.3` version note and adding Section 5.3 Grammar Manifest, Section 5.4 Lint CLI Contract, Section 5.5 Multi-Agent Append Contract.
-  2. **12b handoff.py** (single-file, gated on 12a): `fcntl.flock` sidecar lock acquisition; creation-under-lock with initial meta block (`generation=1`); read-modify-validate-increment-append-replace for existing files.
-  3. **12b bsl_validator.py** (single-file, gated on 12a): add `generation` int to meta block required keys; update grammar manifest comment block.
-  4. **12c test_concurrent_append.py** (single-file, gated on 12b): behavioral sequential simulation verifying sidecar lock acquisition and monotonic generation increment.
-  5. **13 query.py** (deferred): deterministic read-query protocol over parsed BSL AST with `filter_by_agent_id` and `filter_by_signoff_status` primitives. `query_protocol_version` integer.
-- **Coder completion log** preserved: stages 9a/9b/10b/11a/11a2/11b/11d/11e/11f complete. Two parser fix rounds (4-fail and 3-fail) verified.
-- **signoff=true**: documentation pair is internally consistent, additive to prior 12b round-2 docs surface, every claim is grounded in the audit chain. Next artifact-writing stage can attempt stage 12a immediately without waiting on further architecture decisions.
+### 2026-06-08 -- Stage 12b audit round 3: signoff=true
 
-#### Stage 12b audit round 2: signoff=false (archived, resolved)
+- **Kimi** revised 12b kickoff with unified sidecar lock file (`<path>.babel.lock`) resolving the round-2 creation race.
+- **Nemotron** refined into an implementation-ready plan combining sidecar lock + `fcntl.flock(LOCK_EX)` + generation counter + atomic `os.replace` + platform guard.
+- **DeepSeek** audited and signed off: no blockers. Unified sidecar lock serializes both initial `.babel` creation and subsequent appends under the same lock. Creation-under-lock protocol with initial meta block (`generation=1`) written atomically.
+- **Archived (resolved) blockers from rounds 1-2:** generation counter + atomic replace is optimistic locking (round 1); creation race for new `.babel` files (round 2).
+- **Implementation queue:** 12a BISC patch first (spec-first), then 12b handoff.py patch, then 12c concurrent test.
 
-- DeepSeek approved Nemotron's `fcntl.flock` mechanism for existing-file appends but flagged creation race for new `.babel` files as a new blocker. Resolution: unified sidecar lock file (`<path>.babel.lock`) added in round 3.
+### 2026-06-08 -- Stage 12b audit round 2: signoff=false
 
-#### Stage 12b audit round 1: signoff=false (archived, resolved)
+- **Kimi** revised 12b kickoff adopting `fcntl.flock` per prior round 1 audit.
+- **Nemotron** refined into an implementation-ready plan with lock + generation + atomic replace.
+- **DeepSeek** audited: signoff=true on lock-based mechanism for existing files; signoff=false on plan due to missing creation protocol.
+- **New blocker:** Creation race for new `.babel` files (flock only works on existing files).
+- **Prescriptive fix:** Use sidecar lock file or O_CREAT|O_EXCL with atomic rename.
 
-- DeepSeek rejected generation counter + atomic replace as optimistic locking that allows lost updates. Resolution: `fcntl.flock` adopted in round 2/3.
+### 2026-06-08 -- Stage 12b audit round 1: signoff=false
 
-#### Stage 12a BISC amendment plan: signoff (archived, plan approved)
+- **Kimi** kicked off stage 12b after 12a plan approval.
+- **Nemotron** refined into an implementation-ready plan with generation counter + atomic replace.
+- **DeepSeek** audited: signoff=false. Generation counter + atomic replace is optimistic locking, allows lost updates, contradicts conflict-free requirement.
+- **Prescriptive fix:** Use `fcntl.flock` for true mutual exclusion or accept non-conflict-free semantics.
 
-- DeepSeek signed off Nemotron's implementation-ready plan for the BISC v0.10.2 -> v0.10.3 amendment. Three normative sections (5.3 Grammar Manifest, 5.4 Lint CLI Contract, 5.5 Multi-Agent Append Contract) align with committed stages 11b/11d/11e. Physical patch queued as the next single-file spec round.
+### 2026-06-08 -- Stage 12a BISC amendment plan: signoff
 
-#### Stage 11f doc sweep: signoff (archived, complete)
+- **Kimi** kicked off stage 12a BISC amendment after 11f doc sweep.
+- **Nemotron** refined into an implementation-ready draft with three normative sections (5.3 Grammar Manifest, 5.4 Lint CLI Contract, 5.5 Multi-Agent Append Contract) aligning with committed stages 11b/11d/11e.
+- **DeepSeek** audited and signed off: no blockers. The BISC file patch is queued as the next single-file spec round.
 
-- README v0.10.3 documents the `companion.py` `lint <path>` subcommand, the grammar manifest in `bsl_validator.py`, and `test_grammar_manifest.py` behavioral conformance coverage for human consumers.
+### 2026-06-08 -- Stage 11f doc sweep: signoff
 
-#### Stage 11b/11d/11e audit round 3: signoff (archived, complete)
+- **Kimi** kicked off stage 11f doc sweep after 11b/11d/11e delivery.
+- **Nemotron** refined the doc sweep plan covering README updates for lint subcommand, grammar manifest, and conformance test.
+- **DeepSeek** audited and signed off: no blockers. Documentation is accurate and additive.
+- **Delivered in this round:** README documents the companion.py `lint <path>` subcommand (BISC error handling), the grammar manifest location and structure in bsl_validator.py (header regex, block types, explicit literal key names, list/bool encoding), and the test_grammar_manifest.py behavioral conformance coverage.
+- **signoff=true.**
 
-- DeepSeek signed off Nemotron's refined validation surface plan: handoff key ambiguity resolved (10 keys = 9 `HANDOFF_SCHEMA` payload + 1 BSL syntax-layer `version` key), lint has full BISC error handling (`BabelParseError` + `OSError` + `Exception`), conformance test uses behavioral assertions only, grammar manifest is explicit with literal key name lists. Three single-file stages 11b/11d/11e queued.
+### 2026-06-08 -- Stage 11b/11d/11e audit round 3: signoff
 
-#### Stage 11b/11d/11e audit round 2: signoff=false (archived, resolved)
+- **DeepSeek** signed off Nemotron's refined validation surface plan.
+- **All prior blockers resolved:** handoff key count ambiguity (10 keys = 9 payload + version), lint BISC error handling (`BabelParseError` + `OSError` + `Exception`), test fragility (behavioral assertions only).
+- **Three sub-stages queued:** 11b (companion.py lint), 11d (grammar manifest in bsl_validator.py), 11e (test_grammar_manifest.py).
+- **signoff=true.**
 
-- Handoff key count ambiguity flagged and resolved: `HANDOFF_SCHEMA` (stage 9a TypedDict) contains exactly 9 payload keys; `version` is a 10th BSL syntax-layer key required by stage 10a `validate_version`.
+### 2026-06-08 -- Stage 11b/11d/11e audit round 2: handoff keys
 
-#### Stage 11b/11d/11e audit round 1: signoff=false (archived, resolved)
+- **Nemotron** refined plan with round-1 amendments applied (full BISC error handling in lint, behavioral assertions in test).
+- **DeepSeek** audited: signoff=true on amendments; signoff=false on plan with new handoff key count blocker.
+- **Prescriptive resolution:** inspect `HANDOFF_SCHEMA` in handoff.py, list explicit key names for handoff (10), intent (3), meta (3 including generation).
 
-- Two blockers: missing BISC-compliant `OSError`/`Exception` handling in lint subcommand; test fragility from internal `REQUIRED_KEYS` dict access. Both resolved with prescriptive fixes.
+### 2026-06-08 -- Stage 11b/11d/11e audit round 1
 
-#### Stage 11a2 round-5 audit: signoff=true (archived, complete)
+- **Nemotron** refined validation surface plan.
+- **DeepSeek** audited: signoff=false. Two issues: missing BISC-compliant `OSError`/`Exception` handling in lint subcommand, test fragility from internal `REQUIRED_KEYS` dict access.
 
-- `BabelParseError` correctly sourced from `bsl_parser`; dependency inversion via `validate_version` parameterization approved; pre-write gate with bool/list/str encoding approved. Prerequisite micro-patch (`bsl_validator.py` single-file) gating step before 11a2.
+### 2026-06-08 -- Stage 11a2 prerequisite micro-patch: signoff
 
-#### Stage 11a/11a2 split-plan round-3 audit: signoff=true (archived, complete)
+- **Coder** delivered prerequisite micro-patch: `bsl_validator.py` `validate_version(expected_version: str, version: str, line_no: int)` signature; removed `from .handoff import BABEL_VERSION` module-level import.
+- **DeepSeek** signed off Nemotron's corrected 11a2 plan: `BabelParseError` sourced from `bsl_parser`, dependency inversion via parameterization, pre-write gate with `bool`/`list`/`str` encoding.
+- **11a2 implementation unblocked.**
 
-- Both prior blockers (two-file contradiction, `validate_block_string` design ambiguity) fully resolved by split-stage direct-call composition. Five sub-stages queued as single-file rounds.
+### 2026-06-08 -- Stage 11a2 round-4 audit
 
-#### Stage 11a round-2 audit: signoff=false (archived, resolved)
+- **DeepSeek** audited: signoff=false. Two blockers: unverified prerequisite dependency inversion in `bsl_validator.py`, `BabelParseError` import source incorrect.
+- **Resolution path:** single-file prerequisite micro-patch to `bsl_validator.py`, then 11a2 `handoff.py` patch.
 
-- Two-file delivery contradicted anti-timeout cadence; `validate_block_string` constructs redundant block string. Resolved by split into 11a (`bsl_validator.py`) + 11a2 (`handoff.py`) and direct-call composition.
+### 2026-06-08 -- Stage 11a/11a2 split-plan round-3 audit: signoff
 
-#### Stage 11 audit: signoff=false (archived, resolved)
+- **DeepSeek** signed off Nemotron's refined plan: split 11a into 11a (bsl_validator.py) + 11a2 (handoff.py); direct-call composition in `validate_block_string`.
+- **Recommendation:** `validate_block_string` should use `block_type` returned by `validate_header` for `validate_body_kv` to prevent header-body mismatch.
 
-- Three blockers (post-write gate persistence, missing bool encoding, whole-file scope) required amendment before 11a-11d implementation. Resolved in subsequent rounds.
+### 2026-06-08 -- Stage 11a round-2 audit
 
-#### Stage 10a architecture: signoff=true (archived, complete)
+- **DeepSeek** audited: signoff=false. One blocker (two-file delivery contradicts anti-timeout cadence) and one design ambiguity (`validate_block_string` constructs redundant block string).
+- **Resolution path:** split 11a into 11a + 11a2; clarify `validate_block_string` to direct-call `validate_header` + `validate_body_kv`.
 
-- DeepSeek signed off Kimi/Nemotron amended architecture: version in body KV, required keys per block type, parser dependency with fallback. Extra keys policy resolved: reject any key not in required set per block type for deterministic validation. Three single-file stages (9a TypedDict, 9b test, 10b validator) queued.
+### 2026-06-08 -- Stage 11 audit: signoff=false
 
-## v0.10.2 -- BSL Parser + Validator + Handoff Foundation (Released)
+- **DeepSeek** audited Nemotron's refined stage 11 plan: three blockers (post-write gate persistence, missing bool encoding, whole-file scope) require amendment before 11a-11d implementation.
+- **Resolution path:** amendment round with single-file per sub-stage.
 
-- `Babel Source Language (BSL)` parser with file header and `#[/blocks/{type}:{id}]` block headers.
-- `HANDOFF_SCHEMA` with 9 payload keys.
-- BISC v0.10.2 base specification.
-- Stages 1-8 complete.
+### 2026-06-08 -- Two parser fix rounds (4-fail and 3-fail)
+
+- **Coder** delivered minimal patches to `bsl_parser.py` resolving 4 + 3 test failures.
+- **4-fail round:** `missing_intent` line=2 (first body block); strict `FILE_HEADER_REGEX` `r'^#\[babel\]:v?\d+\.\d+\.\d+'`; `duplicate_id` before `missing_intent`; CLI exit 6 verified.
+- **3-fail round:** permissive `FILE_HEADER_REGEX` `r'^#\[babel\]:'` for test fixture compatibility; version consistency check on body+handoffs; `missing_intent` line=1.
+- **All reference/babel tests pass.**
+
+### Coder delivery log
+
+- **Stage 9a:** `HANDOFF_SCHEMA` TypedDict with 9 keys in `reference/babel/handoff.py`.
+- **Stage 9b:** `test_handoff_append.py` conformance assertions.
+- **Stage 10b:** `bsl_validator.py` with `validate_header`, `validate_body_kv`, `validate_version`, `validate_file` and extra-keys policy `REJECT`.
+- **Stage 11a:** `validate_block_string` direct-call composition with header-derived `block_type`.
+- **Stage 11a2:** `handoff.py` pre-write gate with `_encode_handoff_value` and `_decode_handoff_value` for `bool`, `list`, `str` body KV encoding.
+- **Stage 11b:** `companion.py` `lint <path>` subcommand with full BISC error handling.
+- **Stage 11d:** Normative grammar manifest comment block in `bsl_validator.py`.
+- **Stage 11e:** `test_grammar_manifest.py` behavioral conformance test.
+- **Stage 11f:** Doc sweep in README and CHANGELOG.
+- **Prerequisite micro-patch:** `validate_version` parameterization in `bsl_validator.py`.
+- **Parser fix rounds:** 4-fail and 3-fail patches to `bsl_parser.py`.
+
+### Carry-over
+
+- **Stages 5a/5b from v0.10.2 cycle:** `append_handoff` implementation and test patch.
+- **Stage 7b BISC section 5 amendment:** subsumed by stage 12a Section 5.3.
+- **Stage 12b implementation:** gated on 12a commit (spec-first ordering hard constraint).
+- **Stage 13 implementation:** next single-file code round.
