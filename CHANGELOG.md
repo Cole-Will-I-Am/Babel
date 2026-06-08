@@ -4,49 +4,51 @@ All notable changes to MiniMadMax and the Babel stack are recorded here.
 
 ## v0.10.2 — Babel Language Surface (Unreleased)
 
-### Cycle: Stage 4c.1 — BISC Process-Level Error Codes
+### 2026-06-08 — Stage 4c.2e + 4c.2f — README and CHANGELOG Finalize
 
-Shipped a normative amendment to `autonomy-output/babel-bisc-integrity-v0.10.2.md` adding section 4.3 with the two process-level error codes emitted exclusively by the BISC CLI wrapper:
+Updated `README.md` and `CHANGELOG.md` with human-readable summaries of the v0.10.2 contract-first bootstrap, parser logic stages 4a–4c, and the planned handoff append stage 5a. Held the single-file-per-stage anti-timeout cadence that has held since stage 1a.
 
-- `file_error` — `OSError` caught during CLI filesystem operations (read input, write output, access companion `.md` file). Emits `{"error":"OSError","code":"file_error","line":null,"message":"<path>: <oserror str>"}` and exits 6.
-- `internal_error` — unexpected `Exception` (not `BabelParseError`, not `OSError`) caught by the CLI catch-all handler. Emits `{"error":"InternalError","code":"internal_error","line":null,"message":"<ExceptionClass>: <str>"}` and exits 6.
+### 2026-06-08 — Stage 4c.2c — BISC CLI Wrapper
 
-The library/process contract is preserved: `parse_file` and `write_file` raise native Python exceptions (`BabelParseError`, `OSError`) directly; the CLI wrapper translates process-level exceptions into the BISC stderr JSON shape. Library consumers that import `parse_file` directly see idiomatic Python errors and are not required to parse the BISC JSON shape.
+Shipped `reference/babel/__main__.py` CLI wrapper. Catches `BabelParseError` (re-emit as-is), `OSError` (translate to `file_error`), and `Exception` (translate to `internal_error`). Emits BISC-compliant structured stderr JSON. Exits 6 on error, 0 silent on success.
 
-Sections 1-3, 4.1 (six library codes: `duplicate_id`, `version_mismatch`, `malformed_header`, `invalid_intent_json`, `missing_intent`, `multiple_intents`), 4.2 (stderr JSON format for library codes), 5 (duplicate rejection and exit 6), 6 (CLI exit code mapping extended to all eight codes), and 7 (companion_path re-export from `reference/babel/companion.py`) are preserved verbatim from the stage 4b.1 amendment.
+### 2026-06-08 — Stage 4c.2b — Virtual JSON Serializer
 
-This amendment is the hard prerequisite for stage 4c.2c (`reference/babel/__main__.py` CLI wrapper implementation), which must catch `BabelParseError`, `OSError`, and `Exception` and translate them to the eight BISC stderr codes.
+Implemented `to_virtual_json` in `reference/babel/bsl_parser.py` with deterministic `/blocks/<type>:<id>` schema, handoff exclusion, and normalized body sort by type rank (intent=0, spec=1, test=2, impl=3).
 
-### Cycle: Stage 4b.1 — BISC `multiple_intents` Amendment
+### 2026-06-08 — Stage 4c.2a — Atomic Writer
 
-Shipped a normative amendment to `autonomy-output/babel-bisc-integrity-v0.10.2.md` extending the parser error taxonomy in section 4.1 with the sixth code `multiple_intents`:
+Implemented `write_file` in `reference/babel/bsl_parser.py` with atomic tempfile+rename and explicit `tmp_path` cleanup. Target file is never partially written; failed writes leave no tempfile residue.
 
-- Detection rule: more than one `#[intent]:<id>@<version>` block in the body.
-- Line semantics: the second intent block's header line (1-based, from scanner metadata).
-- Stderr JSON shape: `{"error":"BabelParseError","code":"multiple_intents","line":<int>,"message":<str>}` per section 4.2.
-- Ordering note: `duplicate_id` is checked before `multiple_intents`, so two intent blocks with the same id are still reported as `duplicate_id` first. `multiple_intents` only fires when the two intent blocks have distinct id values.
+### 2026-06-08 — Stage 4c.1 — BISC Process-Level Error Codes
 
-Sections 1-3, 4.2, 5, 6, and 7 preserved verbatim from the stage 3b amendment.
+Amended `autonomy-output/babel-bisc-integrity-v0.10.2.md` adding section 4.3 with `file_error` (OSError from CLI) and `internal_error` (unexpected Exception) as the seventh and eighth codes. Library/process contract preserved: library raises native Python exceptions, CLI wrapper translates to BISC stderr JSON.
 
-### Cycle: Stage 3b — BISC Parser Error Taxonomy Amendment
+### 2026-06-08 — Stage 4b.1 — BISC multiple_intents Error Code
 
-Shipped a normative amendment to `autonomy-output/babel-bisc-integrity-v0.10.2.md` adding sections 4-7:
+Amended `autonomy-output/babel-bisc-integrity-v0.10.2.md` extending the parser error taxonomy with `multiple_intents` as the sixth code. Detects >1 intent block in body; line semantics reference the second intent header line. `duplicate_id` is checked before `multiple_intents` so same-id intent pairs report as `duplicate_id` first.
 
-- Section 4: parser error taxonomy (five library codes initially, six after 4b.1, eight after 4c.1).
-- Section 5: duplicate rejection with exit code 6.
-- Section 6: CLI exit code mapping (0 success, 6 BabelParseError).
-- Section 7: companion_path re-export contract binding `reference/babel/bsl_parser.py` to `reference/babel/companion.py`.
+### 2026-06-08 — Stage 4a — Reference Parser Skeleton and Contract Bootstrap
 
-Library/process contract clarified: `parse_file` raises `BabelParseError` (library), and the BISC CLI wrapper (not the library) emits the structured stderr JSON and exits 6 (process).
+Shipped `reference/babel/bsl_parser.py` as a typed skeleton with frozen public API (`parse_file`, `write_file`, `to_virtual_json`, `companion_path`). `companion_path` re-exports `resolve_companion` from `reference/babel/companion.py` per BISC section 7.
 
-### Cycle: Stage 2b — Companion Resolver Skeleton
+### 2026-06-08 — Stage 3b — BISC Parser Error Taxonomy Amendment
 
-Shipped the contract-first bootstrap for the companion `.md` resolver as a single-file deliverable. Follow-up stages (3a test, 4c CLI wrapper) consume this skeleton.
+Amended `autonomy-output/babel-bisc-integrity-v0.10.2.md` with sections 4–7: parser error taxonomy (5 codes), structured stderr JSON format, CLI exit code mapping, and companion_path re-export contract. Resolves both deepseek audit blockers: parse_file raises (library) and CLI wrapper exits 6 (process).
 
-### Cycle: Stage 1c — Contract Bootstrap Appendix
+### 2026-06-08 — Stage 2b — Companion Resolver Skeleton
 
-Shipped the Contract Bootstrap Appendix appended to `autonomy-output/babel-language-integration-v0.10.2.md`. The appendix maps all six parser/companion/handoff API functions to BWSS lifecycle states and the five-step handoff protocol.
+Shipped `reference/babel/companion.py` as a zero-dependency utility with `resolve_companion(babel_path: Path) -> Optional[Path]` stub raising NotImplementedError. Basename-matching contract documented in docstring. No parser imports; preserves the machine/human content boundary.
 
-### Cycle: Stage 1a — Parser Public API Skeleton
+### 2026-06-08 — Stage 1a–1c — Contract Bootstrap
 
-Shipped `reference/babel/bsl_parser.py` with the frozen public API surface: `parse_file`, `write_file`, `to_virtual_json`, `companion_path`, plus `BabelParseError`, `BabelBlock`, `BlockType`, `HandoffBlock`, `Document` dataclasses. All function bodies raise `NotImplementedError` pending stages 4a-4c implementation.
+Shipped reference parser skeleton, handoff.py skeleton, and Contract Bootstrap Appendix mapping `parse_file`/`write_file`/`to_virtual_json`/`companion_path`/`append_handoff`/`resolve_companion` to BWSS lifecycle states and handoff protocol steps. Resolved deepseek's blocking issue on lifecycle mapping.
+
+### 2026-06-07 — Stage 0 — Spec Cycle Kickoff
+
+Shipped four normative specs: `babel-syntax-v0.10.2.md`, `babel-integration-v0.10.2.md`, `babel-bisc-integrity-v0.10.2.md`, `babel-bcpr-v0.10.2.md`. All Nemotron + DeepSeek decisions preserved: JSON-only intent, body sorted, handoff appended, version SemVer shared per file, unique (type, id), virtual JSON `/blocks/<type>:<id>`, body-only canonical_sha256, exit 6 on intent violations.
+
+## Prior Cycles
+
+- **v0.10.1** — initial multi-agent runtime scaffolding.
+- **v0.10.0** — Ollama runtime + GitHub CLI auth.
