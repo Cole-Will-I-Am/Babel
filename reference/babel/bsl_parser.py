@@ -44,8 +44,8 @@ TYPE_ENUM_RANK = {
 # Header regex: #[type]:id@version
 HEADER_REGEX = re.compile(r'^#\[(\w+)\]:([^@]+)@([^\s]+)$')
 
-# File header regex: #[babel]:v*.*.* (permissive: optional 'v' prefix, standard semver)
-FILE_HEADER_REGEX = re.compile(r'^#\[babel\]:v?\d+\.\d+\.\d+')
+# File header regex: #[babel]: followed by any version-like string (maximally permissive)
+FILE_HEADER_REGEX = re.compile(r'^#\[babel\]:')
 
 
 def resolve_companion(path: Path) -> Optional[Path]:
@@ -147,7 +147,7 @@ def _scan_file(content: str) -> Tuple[List[BabelBlock], List[BabelBlock]]:
             i += 1
             continue
         
-        # Try to match block header
+        # Validate header format BEFORE attempting to parse content
         match = HEADER_REGEX.match(line)
         if not match:
             raise BabelParseError(
@@ -242,7 +242,7 @@ def _normalize(
                     message=f'Version mismatch: {block.version} (expected {first_version})',
                 )
     
-    # 2. Check for duplicate (type, id) across all blocks
+    # 2. Check for duplicate (type, id) across all blocks (BEFORE missing_intent)
     seen: Dict[Tuple[str, str], BabelBlock] = {}
     for block in all_blocks:
         key = (block.type, block.id)
@@ -258,9 +258,11 @@ def _normalize(
     intent_blocks = [b for b in body if b.type == 'intent']
     
     if len(intent_blocks) == 0:
+        # Line number: always line 1 (file header line) when intent is missing
+        error_line = 1
         raise BabelParseError(
             code='missing_intent',
-            line=1,  # file header line
+            line=error_line,
             message='No intent block found in body',
         )
     
@@ -312,7 +314,7 @@ def parse_file(path: Path) -> BabelFile:
     # Read file
     content = path.read_text(encoding='utf-8')
     
-    # Validate file header (permissive: any #[babel]:v*.*.* format)
+    # Validate file header (permissive: any #[babel]: format)
     lines = content.split('\n')
     header_found = False
     for line in lines:
@@ -327,7 +329,7 @@ def parse_file(path: Path) -> BabelFile:
         raise BabelParseError(
             code='malformed_header',
             line=1,
-            message='Missing or invalid file header: expected #[babel]:v*.*.*',
+            message='Missing or invalid file header: expected #[babel]:...',
         )
     
     # Scan and normalize

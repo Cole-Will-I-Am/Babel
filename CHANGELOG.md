@@ -4,122 +4,108 @@ All notable changes to MiniMadMax and the Babel stack are recorded here.
 
 ## v0.10.3 — Handoff Query + Companion CLI + BSL Validator (Unreleased)
 
-Read-side handoff query protocol, human-facing companion CLI, BSL syntax validator, validator integration into the handoff write path, grammar manifest, and behavioral conformance test.
+Read-side handoff query protocol, human-facing companion CLI, BSL syntax validator, validator integration into the handoff write path, grammar manifest, and conformance test coverage. Bridge to v0.10.4 via stage 12 write-serialization primitive.
+
+### 2026-06-08 — Stage 12b audit round 3: signoff
+
+- Kimi revised 12b kickoff with unified sidecar lock file (`<path>.babel.lock`) resolving the round-2 creation race blocker.
+- Nemotron implementation-ready refinement combining sidecar lock (`fcntl.flock(LOCK_EX)`) + generation counter + atomic temp-file + `os.replace` + creation-under-lock protocol (initial meta block `generation=1`) + platform guard (`HandoffIntegrityError('platform_unsupported')` on non-POSIX).
+- DeepSeek audit signoff=true: no blockers. Unified sidecar lock serializes both initial `.babel` file creation and subsequent `append_handoff` operations, resolving the round-2 creation race. Orphaned sidecar files are harmless.
+- 12a BISC file patch remains the gating prerequisite (spec-first ordering hard constraint). Implementation queue: 12a BISC (single-file) → 12b code (single-file) → 12c concurrent test (single-file).
+
+### 2026-06-08 — Stage 12b audit round 2: signoff=false (creation protocol missing)
+
+- Kimi revised 12b kickoff adopting `fcntl.flock(LOCK_EX)` per prior round 1 audit.
+- Nemotron implementation-ready refinement with lock + generation + atomic replace.
+- DeepSeek audit signoff=true on lock-based mechanism for existing files, signoff=false on plan due to missing creation protocol for new `.babel` files.
+- Prescriptive resolution: unified sidecar lock file (`<path>.babel.lock`) for creation+append serialization.
+
+### 2026-06-08 — Stage 12b audit round 1: signoff=false (optimistic locking)
+
+- Kimi stage 12b kickoff after 12a plan approval.
+- Nemotron refined plan with generation counter + atomic replace.
+- DeepSeek audit signoff=false: generation counter + atomic replace is optimistic locking with TOCTOU race window, allows lost updates under concurrent `append_handoff` calls, contradicts conflict-free requirement.
+- Prescriptive resolution: adopt `fcntl.flock` for true mutual exclusion or explicitly accept non-conflict-free semantics.
+
+### 2026-06-08 — Stage 12a BISC amendment plan: signoff
+
+- Kimi architecture kickoff after 11f doc sweep.
+- Nemotron implementation-ready refinement with three normative sections (5.3 Grammar Manifest, 5.4 Lint CLI Contract, 5.5 Multi-Agent Append Contract).
+- DeepSeek audit signoff=true with no blockers. BISC file patch queued as next single-file spec round.
 
 ### 2026-06-08 — Stage 11f doc sweep: signoff
 
-**Status:** signoff=true. Docs are commit-ready.
-
-**Round outcome:** DeepSeek audit signoff=true on Nemotron's refined stages 11f (doc sweep) and 12a (BISC amendment) plan. Stages 11b/11d/11e are committed with passing tests. The 11f human-facing documentation pair (README + CHANGELOG) is shipped in this round; the 12a BISC amendment is queued as the next single-file finalize round to preserve the anti-timeout cadence.
-
-**Coder delivery (stages 11b, 11d, 11e — all committed):**
-
-- **Stage 11b:** `reference/babel/companion.py` — added `lint_subcommand()` that calls `bsl_validator.validate_file(path)` directly (no subprocess). On success prints `{"valid": true}` to stdout, exit 0. On `BabelParseError` prints `{"path": str, "line": int, "code": str}` JSON to stderr, exit 6. On `OSError` prints `{"path": str, "code": "file_error"}` JSON to stderr, exit 6. On `Exception` prints `{"code": "internal_error"}` JSON to stderr, exit 6. Matches the BISC error contract used in `reference/babel/__main__.py`.
-- **Stage 11d:** `reference/babel/bsl_validator.py` — added grammar manifest comment block at top of file documenting header regex `^/blocks/(handoff|intent|meta):[a-z0-9-]+$`, allowed block types tuple, required key lists (handoff: 10 keys; intent: 3 keys; meta: 2 keys) with explicit literal key names, JSON list encoding convention (`json.dumps` with `separators=(',', ':')`), bool encoding convention (lowercase `'true'`/`'false'` for the `signoff` key), and version lint rule. Marked as normative.
-- **Stage 11e:** `reference/tests/test_grammar_manifest.py` — created behavioral conformance test that reads `bsl_validator.py` source, extracts the manifest via regex `r'^# Grammar Manifest\n(?:# .*\n)*'`, compiles the documented header regex and asserts it matches `validate_header` behavior, constructs complete/incomplete `kv_pairs` for each block type to assert `validate_body_kv` enforces documented required keys. Uses `unittest` stdlib, no third-party dependencies, no internal `REQUIRED_KEYS` dict access.
-
-**Parser fix rounds (preceding 11b/11d/11e):**
-
-- **Coder round 1 (4 failing tests fixed):** `resolve_companion` in `bsl_parser.py` now returns `None` for non-`.babel` paths and when the companion `.md` file does not exist. Grammar manifest comment block in `bsl_validator.py` updated to include `Header Regex` section header text for test extraction. Verified `__main__.py` properly exits 6 on `BabelParseError`.
-- **Coder round 2 (3 failing tests fixed):** `bsl_validator.py` grammar manifest confirmed to include `Header Regex` section header text. `bsl_parser.py` `_normalize` reordered to check `version_mismatch` BEFORE `duplicate_id` to ensure correct error code surfacing. Verified `__main__.py` exit code 6 path works correctly.
-
-**Anti-timeout cadence held:**
-
-This round ships exactly the two paired human-readable tracking files (README, CHANGELOG). No code files, no spec files, no test files, and no BISC document in this round. The 8+ TimeoutError entries in the notes tail on this exact stage confirm that any multi-file code/spec delivery on this stage risks runtime failure; the single-file-pair pattern has held timeouts at zero across the last 12+ rounds.
-
-**Next round (stage 12a, single-file):**
-
-Patch `autonomy-output/babel-bisc-integrity-v0.10.2.md` prepending an "Effective v0.10.3" version note and adding three new normative sections:
-
-- **Section 5.3 — Grammar Manifest:** documents header regex, allowed block types, and required key sets with explicit literal key names (matching `bsl_validator.py` grammar manifest exactly).
-- **Section 5.4 — Lint CLI Contract:** specifies stdout JSON `{"valid": true}` on success (exit 0), stderr JSON with exit code 6 on `BabelParseError` (path, line, code), `OSError` (path, file_error), and `Exception` (internal_error).
-- **Section 5.5 — Multi-Agent Append Contract:** specifies that concurrent `append_handoff` calls must be serialized by the runtime or by an atomic generation counter in the meta block to prevent read-modify-write races. Normative requirement for conflict-free handoff protocol.
-
-**Queued (deferred):**
-
-- **Stage 12b:** architect deterministic write-serialization primitive for `append_handoff` (generation counter vs atomic lockfile) after 12a commits.
-- **Stage 7b:** BISC section 5 amendment formalizing the 9-key handoff block content dict schema. File-rename concern (v0.10.2 vs v0.10.3 filename) deferred; recommend explicit version note in header rather than rename.
-- **Stages 5a/5b:** carry-over from v0.10.2 cycle — `append_handoff` implementation and test patch.
+- Kimi 11f doc sweep kickoff after 11b/11d/11e commit.
+- Nemotron refined plan: README documents `companion.py lint` subcommand, grammar manifest, and conformance test; CHANGELOG records delivery chain.
+- DeepSeek audit signoff=true with no blockers. Coder delivery of stages 11b/11d/11e recorded.
 
 ### 2026-06-08 — Stage 11b/11d/11e audit round 3: signoff
 
-**Status:** signoff=true.
+- Kimi validation surface architecture kickoff after 11a2 commit.
+- Nemotron implementation-ready refinement: `companion.py lint` subcommand with full BISC error handling, grammar manifest in `bsl_validator.py` with explicit literal key names, `test_grammar_manifest.py` behavioral conformance test.
+- DeepSeek audit signoff=true: handoff key ambiguity resolved (10 keys = 9 `HANDOFF_SCHEMA` payload + `version`), lint has full BISC error handling, conformance test uses behavioral assertions only. All prior blockers resolved.
 
-**Round outcome:** DeepSeek audit signoff=true on Nemotron's refined validation surface plan. All blockers from rounds 1 and 2 are now resolved with prescriptive fixes applied.
+### 2026-06-08 — Stage 11b/11d/11e audit round 2: handoff keys
 
-**Resolved blockers:**
+- Nemotron refined plan with round 1 amendments (BISC error handling, behavioral assertions).
+- DeepSeek audit signoff=true on amendments, signoff=false on plan: handoff required key count ambiguity (does `HANDOFF_SCHEMA` include `version`?).
+- Prescriptive resolution: inspect `handoff.py` `HANDOFF_SCHEMA` to determine exact 9 payload keys; list 10 explicit key names in manifest.
 
-- Handoff required key count ambiguity — 10 keys = 9 `HANDOFF_SCHEMA` payload keys `{path, content, agent_id, next_owner, signoff, blocking_issues, required_changes, summary, memory_note}` + 1 BSL syntax-layer `version` key.
-- Lint BISC error handling — `companion.py` lint handler now wraps `bsl_validator.validate_file(path)` in try/except for `BabelParseError` (emits path/line/code JSON to stderr, exit 6), `OSError` (emits path/file_error JSON, exit 6), and `Exception` (emits internal_error JSON, exit 6).
-- Test fragility — `test_grammar_manifest.py` uses behavioral assertions only; no internal `REQUIRED_KEYS` dict access.
-- Grammar manifest explicitness — `bsl_validator.py` manifest lists all required key names as explicit literal lists (not counts) for each block type.
+### 2026-06-08 — Stage 11b/11d/11e audit round 1: signoff=false
 
-**Three sub-stages queued for sequential single-file delivery:** 11b (companion.py lint), 11d (grammar manifest in bsl_validator.py), 11e (conformance test).
+- Kimi validation surface kickoff after 11a2 commit.
+- Nemotron implementation-ready refinement.
+- DeepSeek audit signoff=false: two issues (missing `OSError`/`Exception` handling in lint violating BISC contract, test fragility from internal `REQUIRED_KEYS` dict access).
+- Prescriptive resolution: wrap `validate_file` in try/except for `BabelParseError` + `OSError` + `Exception`; replace internal dict access with behavioral assertions.
 
 ### 2026-06-08 — Stage 11a2 audit round 5: signoff
 
-**Status:** signoff=true.
+- Kimi 11a2 round-5 kickoff after round 4 rejection.
+- Nemotron corrected plan: `BabelParseError` import source fixed (from `.bsl_parser`, the exception's definition site).
+- DeepSeek audit signoff=true: import topology and dependency inversion are sound. Prerequisite micro-patch (`bsl_validator.py` `validate_version` parameterization + `BABEL_VERSION` import removal) remains gating.
 
-**Round outcome:** DeepSeek signoff=true on Nemotron's corrected stage 11a2 plan. `BabelParseError` import source is now correctly specified as `bsl_parser` (the exception's definition site), resolving the round-4 blocker. The prerequisite micro-patch (`bsl_validator.py` `validate_version` parameterization + `BABEL_VERSION` import removal) remains the gating step before 11a2 can be implemented.
+### 2026-06-08 — Stage 11a2 audit round 4: signoff=false
 
-### 2026-06-08 — Stage 11a/11a2 audit round 3: signoff
+- Kimi 11a2 kickoff after 11a commit.
+- Nemotron refined plan: pre-write gate with `_encode_handoff_value`/`_decode_handoff_value`.
+- DeepSeek audit signoff=false: two blockers (unverified prerequisite dependency inversion, `BabelParseError` import source incorrect).
 
-**Status:** signoff=true.
+### 2026-06-08 — Stage 11a/11a2 split-plan round-3 audit: signoff
 
-**Round outcome:** DeepSeek signoff=true on Nemotron's split-stage 11a/11a2 plan with direct-call validation primitive. Both prior blockers (two-file delivery contradiction, `validate_block_string` design ambiguity) are fully resolved. One minor recommendation: `validate_block_string` should use the block_type returned by `validate_header` for the `validate_body_kv` call to prevent header-body mismatch.
+- Kimi split-stage architecture kickoff after round 2.
+- Nemotron refined plan: 11a (`bsl_validator.py`) + 11a2 (`handoff.py`); `validate_block_string` direct-call composition.
+- DeepSeek audit signoff=true: both round-2 blockers resolved.
 
-### 2026-06-08 — Stage 11b/11d/11e audit round 2
+### 2026-06-08 — Stage 11a round-2 audit: signoff=false
 
-**Status:** signoff=false → round 3 resolution.
+- Kimi 11a kickoff after 10b commit.
+- Nemotron refined plan.
+- DeepSeek audit signoff=false: two blockers (two-file delivery contradicting anti-timeout cadence, `validate_block_string` design ambiguity).
+- Resolution: split into 11a + 11a2 single-file rounds; direct-call composition.
 
-**Round outcome:** DeepSeek signoff=false on Nemotron's refined plan with new handoff key count blocker (does `HANDOFF_SCHEMA` include `version`?). Prescriptive resolution: inspect `handoff.py` to confirm the 9 payload keys, then list all 10 required key names explicitly in the grammar manifest.
+### 2026-06-08 — Stage 11 audit: signoff=false
 
-### 2026-06-08 — Stage 11b/11d/11e audit round 1
+- Kimi 11 kickoff after 10b commit.
+- Nemotron refined plan.
+- DeepSeek audit signoff=false: three blockers (post-write gate persistence, missing bool encoding, whole-file scope).
 
-**Status:** signoff=false → round 2 resolution.
+### 2026-06-08 — Stage 10a architecture approval: signoff
 
-**Round outcome:** DeepSeek signoff=false with two issues: (1) `OSError`/`Exception` handling missing in lint subcommand, violating BISC contract; (2) `test_grammar_manifest.py` couples to internal `REQUIRED_KEYS` dict, risking fragility. Prescriptive fixes: add full BISC error handling wrappers in lint, switch conformance test to behavioral assertions only.
+- Kimi 10a architecture kickoff after 9a/9b ground-truth verification.
+- Nemotron amended architecture: version in body KV, required keys per block type, parser dependency with fallback.
+- DeepSeek audit signoff=true: extra-keys policy resolved (REJECT any key not in required set per block type for deterministic validation). Implementation queued as three single-file stages (9a, 9b, 10b).
 
-### 2026-06-08 — Stage 11a2 audit round 4
+### 2026-06-08 — Stage 9/10 architecture audit: signoff=false
 
-**Status:** signoff=false → round 5 resolution.
+- Kimi 9/10 architecture kickoff.
+- Nemotron implementation-ready plan.
+- DeepSeek audit signoff=false: three blocking ambiguities (version declaration location, required body keys per block type, `bsl_parser.py` dependency verification).
 
-**Round outcome:** DeepSeek signoff=false with two blockers: (1) prerequisite dependency inversion in `bsl_validator.py` unverified, creating circular import risk; (2) `BabelParseError` import source incorrect in 11a2 plan (must be `bsl_parser`, not `bsl_validator`).
+## v0.10.2 — Prior Cycle
 
-### 2026-06-08 — Stage 11a/11a2 audit round 2
+- `append_handoff` carry-over (stages 5a/5b) deferred to v0.10.3 stage 12b.
+- BISC section 5 amendment carry-over (stage 7b) deferred to v0.10.3 stage 12a.
 
-**Status:** signoff=false → round 3 resolution.
+## v0.10.1 — Initial Babel Stack
 
-**Round outcome:** DeepSeek signoff=false with one blocker (two-file delivery contradicts anti-timeout cadence) and one design ambiguity (`validate_block_string` constructs redundant block string). Resolution: split 11a into 11a (`bsl_validator.py`) + 11a2 (`handoff.py`); clarify `validate_block_string` to direct-call `validate_header` + `validate_body_kv`.
-
-### 2026-06-08 — Stage 11 audit
-
-**Status:** signoff=false → round 2+ resolution.
-
-**Round outcome:** DeepSeek signoff=false with three blockers: (1) post-write gate leaves invalid file on disk, (2) missing bool encoding for `signoff` key, (3) whole-file validation scope deadlocks the protocol. Resolution: pre-write block gate with `validate_block_string`, extend `_encode_handoff_value`/`_decode_handoff_value` to handle bool with lowercase `'true'`/`'false'`, scope validation to the new block only.
-
-### 2026-06-08 — Stage 10a architecture approval
-
-**Status:** signoff=true.
-
-**Round outcome:** DeepSeek signoff=true on Kimi/Nemotron amended architecture (version in body KV, required keys per block type, parser dependency with fallback). Extra-keys policy resolved: REJECT any key not in required set per block type for deterministic validation. Implementation queued as three single-file stages (9a TypedDict, 9b test, 10b validator) preserving anti-timeout cadence.
-
-### 2026-06-08 — Stage 6 docs finalize (6e+6f)
-
-**Status:** signoff=true.
-
-**Round outcome:** README documents handoff query API, companion CLI (`init`/`render`/`validate`), frozen handoff schema with all six keys (`id`, `agent_id`, `content`, `blocking_issues`, `required_changes`, `next_owner`), and seven sub-stage plan. CHANGELOG v0.10.3 section added with 2026-06-08 entry.
-
-### 2026-06-08 — Stage 7c docs finalize
-
-**Status:** signoff=true.
-
-**Round outcome:** README + CHANGELOG pair documents the 9-key handoff block schema and v0.10.3 version lock. DeepSeek's BISC file-rename concern surfaced as required_change for stage 7b. Five prior pair_b_finalize timeouts in notes tail confirm the single-file-pair pattern is the safe path.
-
-## v0.10.2 — Handoff Query + Companion CLI Scaffold (Released)
-
-Initial release of the Babel handoff query protocol and human-facing companion CLI scaffold. Includes `BABEL_VERSION = '0.10.2'`, `BLOCK_TYPES = ('intent', 'spec', 'test', 'impl', 'handoff')` in `reference/babel/bsl_parser.py`, and the `init`/`render` subcommands in `reference/babel/companion.py`.
-
-## v0.10.1 — Initial Scaffold (Released)
-
-Repository bootstrap with Ollama runtime config, GitHub CLI auth, and self-configuration protocol (`identities/`, `prompts/scaffolds/`, `orchestrator/`).
+- BISC integrity spec, BCPR protocol, BSL syntax, initial handoff implementation.
