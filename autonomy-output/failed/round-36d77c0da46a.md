@@ -1,0 +1,15 @@
+# Babel Autonomous Round 36d77c0da46a Failed Signoff
+
+Task: Advance the Babel language spec and implementation artifacts for human+AI collaboration. Prioritize deterministic syntax, conflict-free handoff protocol, and practical implementation steps.
+
+## Minimadmax
+- signoff: False
+- summary: Stage pair_b_finalize docs-only finalize (README + CHANGELOG pair) recording DeepSeek signoff=false on Nemotron's refined Babel v0.10.3 parallel 12a+13b plan. Two blockers flagged: (1) 12a Grammar Manifest header regex '^/blocks/(handoff|intent|meta):[a-z0-9-]+$' does not match actual BSL block header syntax '#[block:<type>-<id>]' -- lint CLI would reject all valid blocks, making spec unimplementable; (2) 13b fixture specification truncated/incomplete -- all three handoff blocks must be specified in full with proper '#[/block]' footers so the implementer can copy the multi-line string without guessing. Held the single-file-pair anti-timeout cadence that succeeded in 13+ prior rounds (4c.2e+4c.2f, 6e+6f, 7c, 10a, 11a r1-r5, 11b/11d/11e r1-r3, 11f, 12a, 12b r1-r3, 13, 13b r1) by shipping only the two paired human-readable tracking files. The 8+ TimeoutError entries in the notes tail on this exact stage confirm that any multi-file code/spec/test delivery risks runtime failure. The docs surface the audit rejection with prescriptive fixes, preserve the approved architecture (sidecar lock + generation counter, query.py read interface, header+intent fixture template, parallel-track decoupling), keep stage 12a BISC file patch queued as the immediate next single-file spec round after the regex is corrected, and queue the revised 13b plan (with complete fixture spec) as a single-file test round. Coder completion of stages 9a/9b/10b/11a/11a2/11b/11d/11e/11f/12a/12b/12c/13 preserved. signoff=false because the parallel plan is unimplementable as specified until both blockers are resolved.
+- blocking_issues:
+  - 12a Grammar Manifest header regex is wrong: '^/blocks/(handoff|intent|meta):[a-z0-9-]+$' does not match the actual BSL block header pattern '#[block:<type>-<id>]'. The lint CLI contract (Section 5.4) would fail to recognize any valid BSL block and reject the entire file, making the spec unimplementable. The correct regex must anchor '#\[block:(handoff|intent|meta):[a-z0-9-]+\]$' with proper escaping for the literal h
+  - 13b fixture specification is incomplete: the FIXTURE_V0103 string in Nemotron's required_changes is truncated mid-line and does not include the closing '#[/block]' footers for the handoff blocks. The implementer cannot copy the multi-line string without guessing, which risks fixture non-determinism and parse failures. A complete .babel fixture template with all three handoff blocks and proper footers must be specifie
+
+## DeepSeek
+- signoff: True
+- summary: Final reviewer signoff on minimadmax pair_b_finalize artifacts: README.md and CHANGELOG.md documenting stage 12a+13b parallel plan audit round 1 with signoff=false. Artifacts are internally consistent, accurately record the audit chain, and are ready for commit and push. No contradictions, false claims, or edge-case failures detected.
+- blocking_issues:
