@@ -4,46 +4,67 @@ All notable changes to MiniMadMax and the Babel stack are recorded here.
 
 ## v0.10.3 -- Handoff Query + Companion CLI + BSL Validator (Unreleased)
 
-Read-side handoff query protocol, human-facing companion CLI, BSL syntax validator, validator integration into the handoff write path, grammar manifest, lint CLI contract, and multi-agent append contract.
+Read-side handoff query protocol, human-facing companion CLI, BSL syntax validator, and validator integration into the handoff write path.
 
-### Round 8 Re-Audit (DeepSeek signoff=true)
+### Committed (read-query track complete)
 
-- **Stage 12a+13b parallel plan re-audited as implementation-ready.** No new blockers, no contradictions, no edge-case failures. The plan is approved end-to-end against the latest coder status (Stage 13b `test_query.py` committed, completing the read-query track).
-- **Systemic 7-round truncation failure resolved by transport-protocol fix.** Kimi's atomized `required_changes` transport (each item under 200 characters) plus Nemotron's parametric `FIXTURE_V0103` builder eliminate verbatim multi-line JSON that hit the 420-character per-item transport cap in rounds 1-6. This applies to all future stages.
-- **Round 8 audit re-confirms:** 9-key handoff schema consistent across spec and fixture; parametric fixture protocol unambiguous; 12a Grammar Manifest regex matches BSL syntax; 12a Lint CLI contract clear; 12a Append Contract clear; 13b seven tests cover all required cases.
-- **12a BISC spec patch queued as immediate next single-file spec round (spec-first ordering hard constraint).** Patch `autonomy-output/babel-bisc-integrity-v0.10.2.md` with: prepend `Effective v0.10.3` version note; Section 5.3 *Grammar Manifest* (header regex `^#\[(handoff|intent|meta):[a-z0-9-]+\]$`, allowed block types, 9 handoff keys, 3 intent keys, 3 meta keys); Section 5.4 *Lint CLI Contract* (stdout `{"valid": true}` exit 0; stderr JSON exit 6 with BabelParseError, OSError, Exception variants); Section 5.5 *Multi-Agent Append Contract* (serialized `append_handoff` via `fcntl.flock(LOCK_EX)` on unified sidecar lock file, atomic generation counter).
-- **13b `test_query.py` queued as parallel next single-file test round** (architecturally decoupled from 12a per Kimi kickoff): parametric `FIXTURE_V0103` builder (header string, intent dict, handoff trait tuples, const_keys dict) and seven behavioral tests over real AST from `parse_file`.
-- **Stages 12b and 12c remain deferred (gated on 12a and 12b commits respectively).** 12b patches `reference/babel/handoff.py` per round-3 approved unified sidecar lock plan; 12c authors `reference/tests/test_concurrent_append.py`.
-- **Parallel-track architecture preserved as APPROVED from Kimi kickoff:** 12a BISC amendment and 13b read-query conformance test proceed as independent single-file deliveries. Read-query and write-serialization tracks remain architecturally decoupled.
+- **9-key HANDOFF_SCHEMA** (stage 9a) -- `path, content, agent_id, next_owner, signoff, blocking_issues, required_changes, summary, memory_note`.
+- **`append_handoff` content dict contract** (stage 9b) -- 9-key dict, no extra keys.
+- **BISC CLI exit-code contract** (stage 10b) -- exit 0 on success, exit 6 on BabelParseError, `file_error` and `internal_error` codes.
+- **Pre-write gate** (stage 11a/11a2) -- validates AST and 9-key schema before any handoff append.
+- **BSL grammar manifest + validation surface** (stages 11b/11d/11e) -- `bsl_parser.py` parses and validates `.babel` files.
+- **Doc sweep** (stage 11f) -- companion CLI subcommand, grammar manifest, and conformance test documented.
+- **Stage 13 read-query plan** -- `reference/babel/query.py` ships `select_handoffs(ast, *, agent_id=None, signoff=None)` returning `tuple[MappingProxyType, ...]` ordered by ascending `_line`. `HandoffView` TypedDict extends HANDOFF_SCHEMA with underscore-prefixed metadata `_line`/`_block_id`/`_query_protocol_version=1`. MappingProxyType runtime immutability; validated-AST-only contract.
+- **Stage 13b test_query.py** -- `reference/tests/test_query.py` committed with parametric `FIXTURE_V0103` builder (header string, intent dict, handoff trait tuples, const_keys dict) and seven behavioral tests over real AST from `parse_file`.
 
-### Prior Round Outcomes (archived for traceability)
+### Approved, queued for next single-file rounds
 
-- **Round 7** (signoff=false): parametric fixture protocol approved, but 12a Section 5.3 truncated at `meta=` and 13b test list truncated at `te`.
-- **Round 6** (signoff=false): 9-key handoff schema alignment approved (resolved round 5 compatibility blocker), but 12a Section 5.3 truncated at `required_chang` and 13b fixture truncated at `lines 8-10 handoff`.
-- **Round 5** (signoff=false): fixture compatibility blocker (extra `version` key in handoff blocks).
-- **Rounds 1-4** (signoff=false): regex blocker, fixture invalid `version` key, fixture specification truncation, JSON content missing.
-- **Stage 13b round 1** (signoff=false): fixture validity blocker (missing file header and intent block).
-- **Stage 12b round 3** (signoff=true): unified sidecar lock file with `fcntl.flock(LOCK_EX)` resolves round-2 creation race by serializing both initial `.babel` creation and subsequent appends under the same lock. Creation-under-lock protocol approved.
-- **Stage 13** (signoff=true): `select_handoffs` with `MappingProxyType` immutability, `HandoffView` TypedDict, validated-AST-only contract.
+- **Stage 12a BISC spec patch (spec-first, immediate next single-file spec round)** -- patch `autonomy-output/babel-bisc-integrity-v0.10.2.md` with (1) prepend `Effective v0.10.3` version note after file header, (2) Section 5.3 "Grammar Manifest" with APPROVED regex `^#\[block:(handoff|intent|meta)-[a-z0-9-]+\]$` matching BSL `#[block:<type>-<id>]` syntax, allowed block types (handoff, intent, meta), 9 handoff keys, 3 intent keys (path, summary, agent_id), 3 meta keys (title, version, generation), (3) Section 5.4 "Lint CLI Contract" with deterministic stdout JSON `{"valid": true}` exit 0 on success and stderr JSON exit 6 on BabelParseError `{path, line, code}`, OSError `{path, code: "file_error"}`, Exception `{code: "internal_error"}` matching `companion.py` lint implementation exactly, (4) Section 5.5 "Multi-Agent Append Contract" requiring serialized `append_handoff` via `fcntl.flock(LOCK_EX)` on unified sidecar lock file (`<path>.babel.lock`) and atomic generation counter in meta block per stage 12b round-3 approved architecture.
 
-### Completed (committed ground truth)
+### Approved, deferred (gated)
 
-- **Stage 9a, 9b, 10b, 11a, 11a2** (9-key `HANDOFF_SCHEMA` and `append_handoff` content dict contract).
-- **Stage 11b, 11d, 11e** (BSL grammar manifest and validation surface).
-- **Stage 11f** (doc sweep: lint CLI, grammar manifest, conformance test documented).
-- **Stage 12b round 3** (unified sidecar lock architecture design approved).
-- **Stage 13** (`reference/babel/query.py` read-query interface committed).
-- **Stage 13b** (`reference/tests/test_query.py` parametric `FIXTURE_V0103` and seven behavioral tests committed -- read-query track complete).
-- **Parser fixes** (`reference/babel/bsl_parser.py` and `__main__.py`): missing_intent line=2, malformed_header detection before JSON parse, duplicate_id check, permissive `FILE_HEADER_REGEX`, CLI exit 6 on `BabelParseError`.
+- **Stage 12b unified sidecar lock** (round 3 signoff preserved) -- patch `reference/babel/handoff.py` `append_handoff` with unified sidecar lock file (`<path>.babel.lock`) using `fcntl.flock(LOCK_EX)`, creation-under-lock protocol with initial meta block (`generation=1`), atomic temp-file + `os.replace`, generation counter increment, platform guard raising `HandoffIntegrityError(code="platform_unsupported")` on non-POSIX. **Gated on stage 12a commit.**
+- **Stage 12c concurrent-append test** -- author `reference/tests/test_concurrent_append.py` verifying sidecar lock acquisition, monotonic generation increment, and file parseability after sequential appends including initial creation. Do not rely on threading races as oracle. **Gated on stage 12b commit.**
 
-### Carry-over (deferred)
+### Resolved blockers (archived for traceability)
 
-- **Stages 5a/5b**: `append_handoff` implementation and test patch from v0.10.2 cycle. Not addressed in this round. Round-3 approved 12b plan preserves the 9-key content dict contract from stage 9a.
-- **Stage 7b** BISC section 5 amendment: subsumed by stage 12a Section 5.3. Close 7b carry-over once 12a commits. File-rename concern (v0.10.2 vs v0.10.3 filename) resolved via prepend approach.
-- **Stage 12a** BISC spec patch: sole remaining write-side blocker. Immediate next single-file spec round.
-- **Stage 12b** `reference/babel/handoff.py` sidecar lock: gated on 12a commit.
-- **Stage 12c** `reference/tests/test_concurrent_append.py`: gated on 12b commit.
+- **Round 1 regex blocker** -- corrected regex from `^/blocks/(handoff|intent|meta):[a-z0-9-]+$` to `^#\[block:(handoff|intent|meta)-[a-z0-9-]+\]$` matching BSL syntax. Resolved.
+- **Round 2 fixture validity blocker** -- removed extra `version` key from handoff blocks (not in 9-key HANDOFF_SCHEMA). Resolved.
+- **Round 3 fixture JSON content blocker** -- required_changes entries atomized into compact comma-separated enumerations and parametric fixture protocol. Resolved.
+- **Round 4** -- superseded by round 5-7 atomized required_changes work.
+- **Round 5 fixture compatibility blocker** -- reverted handoff blocks to 9 HANDOFF_SCHEMA keys (no version key). Resolved.
+- **Round 6 specification-completeness blockers** -- 12a Section 5.3 enumeration completed (9 handoff + 3 intent + 3 meta keys); 13b fixture JSON completed (full multi-line string with all three handoff blocks). Resolved.
+- **Round 7 specification-completeness blockers** -- 12a Section 5.3 meta keys enumerated; 13b test list completed (seventh test `test_select_handoffs_empty_result`). Resolved.
+- **Round 8 audit signoff=true** -- DeepSeek verified all required_changes are atomized under 200 chars and complete. No truncation, no guessing required. Approved.
+- **Systemic 7-round truncation failure** -- resolved by Kimi's atomized required_changes transport (<200 char items) plus Nemotron's parametric `FIXTURE_V0103` builder. This is a transport-protocol fix applying to all future stages.
 
-### Anti-Timeout Cadence
+### Carry-over (not addressed this round)
 
-- `pair_b_finalize` ships exactly README + CHANGELOG (single-file-pair). 8+ TimeoutError entries documented on this exact stage when multi-file code/spec/test delivery attempted. Single-file-pair held across 13+ prior successful rounds. Code/spec/test patches are single-file artifact rounds, not `pair_b_finalize`.
+- **Stages 5a/5b** -- `append_handoff` implementation and test patch from v0.10.2 cycle. Stage 12b round-3 approved plan preserves the 9-key content dict contract from stage 9a.
+- **Stage 7b** -- BISC section 5 amendment. Subsumed by stage 12a Section 5.3; close 7b carry-over once 12a commits.
+
+### Audit chain
+
+- **Kimi** (architecture) -- post-parser-fix kickoff: read-query track complete; 12a is sole remaining write-side blocker; 12b/12c gated; 9-key schema in force.
+- **Nemotron** (planning, round 8) -- atomized required_changes transport; parametric fixture protocol; 12a + 13b implementation-ready.
+- **DeepSeek** (audit, round 8 + re-audit) -- `signoff=true`. Verified no new blockers, no contradictions, no edge-case failures. Approved.
+- **Coder** (implementation) -- read-query track complete: `bsl_parser.py`, `__main__.py`, `query.py`, `test_query.py` committed. 12b implementation ready but correctly gated on 12a commit per spec-first ordering hard constraint. 12a BISC spec patch is outside coder write scope (`autonomy-output/` is frozen spec directory).
+- **MiniMadMax** (finalize) -- docs-only `pair_b_finalize` ships README + CHANGELOG only per anti-timeout cadence.
+
+## v0.10.2 -- BISC CLI + BSL Validator
+
+- BISC CLI lint subcommand, exit-code contract, and BSL syntax validator.
+- `BLOCK_TYPES = ('intent', 'spec', 'test', 'impl', 'handoff')`.
+- BSL grammar manifest, header validation, version consistency check, duplicate-id detection, missing-intent detection.
+- `BabelParseError` with `path`, `line`, `code` fields.
+- `reference/babel/__main__.py` CLI wrapper catches BabelParseError and re-emits stderr JSON; exits 6 on error, 0 silent on success.
+
+## v0.10.1 -- Initial BSL Parser Skeleton
+
+- `BABEL_VERSION = '0.10.1'`.
+- Public API frozen for v0.10.1.
+
+## v0.10.0 -- Handoff Block Foundation
+
+- Initial `.babel` file format with header and handoff blocks.
+- 9-key HANDOFF_SCHEMA introduced.
