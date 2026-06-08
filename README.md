@@ -6,95 +6,150 @@ Autonomous multi-agent engineering runtime for the Babel/BCPR/BISC stack.
 
 - **Ollama runtime** — hosts `minimadmax:latest` and profile variants (`balanced`, `precise`, `fast`, `deep`).
 - **GitHub CLI auth** — local `gh` with HTTPS git-credential helper; target repos: `Cole-Will-I-Am/MiniMadMax`, `Cole-Will-I-Am/new-lab`.
-- **Babel stack** — BSL syntax, handoff block protocol, BISC integrity contract, BCPR prompt protocol.
-- **Babel validator surface** — `reference/babel/bsl_validator.py` (validate_header, validate_body_kv, validate_version, validate_file, validate_block_string), `reference/babel/companion.py` (lint subcommand with full BISC error handling).
-- **Grammar manifest** — normative comment block at top of `reference/babel/bsl_validator.py` documenting header regex, allowed block types, required keys per type, JSON list encoding, bool encoding.
-- **Conformance tests** — `reference/tests/test_grammar_manifest.py` (behavioral assertions against manifest), `reference/tests/test_handoff_append.py` (conformance against HANDOFF_SCHEMA), `reference/tests/test_handoff_validation_gate.py` (pre-write gate, round-trip encoding).
+- **Babel stack** — `.babel` files (BSL syntax), `reference/babel/` parser/validator/companion modules, BISC integrity spec.
+- **Multi-agent orchestration** — finalize/remediate pipeline with model-to-model handoffs; no human-in-the-loop.
 
-## Babel v0.10.3 — Handoff Query + Companion CLI + BSL Validator
+## Repository Layout
 
-Read-side handoff query protocol, human-facing companion CLI, BSL syntax validator, and validator integration into the handoff write path. Continues the append-query collaboration loop from v0.10.2.
+```
+MiniMadMax/
+├── README.md                    # this file
+├── CHANGELOG.md                 # version history
+├── reference/
+│   └── babel/
+│       ├── bsl_parser.py        # BSL parser (BabelParseError)
+│       ├── bsl_validator.py     # BSL validator + grammar manifest
+│       ├── companion.py         # human-facing CLI (init, render, validate, lint)
+│       ├── handoff.py           # HANDOFF_SCHEMA + pre-write gate
+│       └── __main__.py          # module entry point
+├── autonomy-output/
+│   └── babel-bisc-integrity-v0.10.2.md  # BISC spec (amended effective v0.10.3)
+└── ...
+```
 
-### Stage 7 — Handoff Block Schema (locked)
+## Quick Start
 
-Nine-key handoff block content dict: `path`, `content`, `agent_id`, `next_owner`, `signoff`, `blocking_issues`, `required_changes`, `summary`, `memory_note`. BSL version KV is a 10th key required by the syntax layer. BISC section 5 amendment still pending (carry-over).
+```bash
+# Scaffold a new .babel file
+python -m babel.companion init myproject.babel
 
-### Stage 9 — HANDOFF_SCHEMA TypedDict (complete)
+# Render handoffs sequentially
+python -m babel.companion render myproject.babel
 
-`HANDOFF_SCHEMA` TypedDict committed in `reference/babel/handoff.py` with the 9 payload keys. Conformance test `reference/tests/test_handoff_append.py` asserts stored handoff blocks conform to the schema.
+# Validate whole file (CI / human use)
+python -m babel.companion validate myproject.babel
 
-### Stage 10 — BSL Validator (complete)
+# Lint a single file with BISC-compliant JSON output
+python -m babel.companion lint myproject.babel
+```
 
-`reference/babel/bsl_validator.py` module with:
+## v0.10.3 — Handoff Query + Companion CLI + BSL Validator (Unreleased)
 
-- `validate_header(header_line, line_no) -> tuple[str, str]` — extracts block type and block id from `/blocks/(handoff|intent|meta):[a-z0-9-]+$` headers.
-- `validate_body_kv(block_type, kv_pairs, line_no) -> None` — enforces required keys per block type; rejects extra keys (REJECT policy); rejects duplicate keys.
-- `validate_version(expected_version, version, line_no) -> None` — semver string equality check, raises `BabelParseError` with `code='version_mismatch'`.
-- `validate_file(path) -> None` — orchestrates all three for whole-file validation.
-- `validate_block_string(block_type, header, kv_pairs) -> None` — direct-call composition using header-derived `block_type` for pre-write gating.
+Read-side handoff query protocol, human-facing companion CLI, BSL syntax validator, validator integration into the handoff write path, grammar manifest, and behavioral conformance test.
 
-Extra-keys policy: **REJECT** (deterministic default; prevents silent schema drift).
+### Validation Surface (Stages 11b/11d/11e — committed)
 
-### Stage 11 — Validator Integration & Grammar Formalization (complete)
+The BSL validation surface is now formalized with three coordinated artifacts:
 
-Pre-write validation gate in `reference/babel/handoff.py` (stage 11a2) with str/list/bool encoding helpers, `HandoffIntegrityError` exception, and corrected import topology:
+#### 1. `reference/babel/companion.py` — `lint` subcommand (Stage 11b)
 
-- `validate_block_string` from `.bsl_validator`
-- `BabelParseError` from `.bsl_parser` (definition site)
-- `BABEL_VERSION` import removed from `bsl_validator`; passed explicitly to `validate_version`
+Human-facing single-file lint with BISC-compliant JSON output.
 
-### Stage 11b/11d/11e — Validation Surface (signoff round 3)
+**Usage:**
+```bash
+python -m babel.companion lint <path.babel>
+```
 
-Three single-file stages approved by DeepSeek audit (signoff=true) and queued for sequential delivery:
+**Output contract (matches `reference/babel/__main__.py` BISC pattern):**
 
-**11b — Companion lint subcommand** (`reference/babel/companion.py`):
+| Outcome | Stream | JSON payload                                  | Exit code |
+|---------|--------|-----------------------------------------------|-----------|
+| Valid   | stdout | `{"valid": true}`                              | 0         |
+| BabelParseError | stderr | `{"path": "<str>", "line": <int>, "code": "<str>"}` | 6         |
+| OSError (file not found / unreadable) | stderr | `{"path": "<str>", "code": "file_error"}`        | 6         |
+| Exception (unexpected internal) | stderr | `{"code": "internal_error"}`                     | 6         |
 
-- Add `lint <path>` subcommand alongside existing `validate`.
-- Direct call to `bsl_validator.validate_file(path)` (no subprocess).
-- Full BISC error handling: `BabelParseError` → `{'path': str(path), 'line': line_no, 'code': code}` stderr, exit 6; `OSError` → `{'path': str(path), 'code': 'file_error'}` stderr, exit 6; `Exception` → `{'code': 'internal_error'}` stderr, exit 6.
-- Success: `{'valid': true}` stdout, exit 0.
+The `lint` handler calls `bsl_validator.validate_file(path)` directly (no subprocess indirection) and wraps the call in three `except` branches: `BabelParseError` (emits path/line/code JSON), `OSError` (emits path/file_error JSON), and bare `Exception` (emits internal_error JSON). The existing `validate` subcommand is preserved as a subprocess wrapper for backward compatibility.
 
-**11d — Grammar manifest** (`reference/babel/bsl_validator.py` top):
+#### 2. `reference/babel/bsl_validator.py` — Grammar Manifest (Stage 11d)
 
-- Normative comment block documenting:
-  1. Header regex `^/blocks/(handoff|intent|meta):[a-z0-9-]+$` with allowed block types tuple.
-  2. Required body keys per type with explicit key name lists:
-     - handoff = `{path, content, agent_id, next_owner, signoff, blocking_issues, required_changes, summary, memory_note, version}` (10 total).
-     - intent = `{purpose, owner, version}` (3 total).
-     - meta = `{title, version}` (2 total).
-  3. JSON list encoding: `json.dumps(value, separators=(',', ':'))` for `list[str]`.
-  4. Bool encoding: lowercase `'true'`/`'false'` for `signoff` key.
-  5. Version lint rule referencing `BABEL_VERSION` import.
+A normative comment block at the top of `bsl_validator.py` documents the BSL grammar and is the single source of truth for both the validator implementation and the conformance test. Extracted by `test_grammar_manifest.py` via regex.
 
-**11e — Conformance test** (`reference/tests/test_grammar_manifest.py`):
+**Manifest contents:**
 
-- Behavioral assertions only — no internal `REQUIRED_KEYS` dict access.
-- Reads `bsl_validator.py` source; extracts manifest via regex `r'^# Grammar Manifest\n(?:# .*\n)*'`.
-- Compiles documented header regex; calls `validate_header` with valid/invalid headers to verify behavioral match.
-- For each block type, constructs `kv_pairs` with all required keys → assert no error; omits one key → assert `BabelParseError` with expected code.
+- **Header regex:** `^/blocks/(handoff|intent|meta):[a-z0-9-]+$`
+- **Allowed block types:** `('handoff', 'intent', 'meta')`
+- **Required keys per type (explicit literal lists, not counts):**
+  - `handoff` (10 keys): `path`, `content`, `agent_id`, `next_owner`, `signoff`, `blocking_issues`, `required_changes`, `summary`, `memory_note`, `version`
+  - `intent` (3 keys): `purpose`, `owner`, `version`
+  - `meta` (2 keys): `title`, `version`
+- **JSON list encoding:** compact `json.dumps(value, separators=(',', ':'))` for `list[str]` values
+- **Bool encoding:** lowercase `'true'` / `'false'` for the `signoff` key (matches JSON convention)
+- **Extra-keys policy:** REJECT (any key not in the required set for the block type fails validation)
 
-#### Handoff key ambiguity resolution (archived)
+The 9 payload keys in `handoff` correspond to the `HANDOFF_SCHEMA` TypedDict from `reference/babel/handoff.py` (stage 9a). The 10th required key (`version`) is a BSL syntax-layer requirement enforced by `validate_version`, separate from the payload schema.
 
-The round-2 blocker "9 HANDOFF_SCHEMA keys + version" is resolved by inspection: `HANDOFF_SCHEMA` (stage 9a TypedDict) contains exactly 9 payload keys. The 10th key (`version`) is a BSL syntax layer requirement, separate from the payload schema. Grammar manifest lists all 10 key names explicitly to prevent recurrence.
+#### 3. `reference/tests/test_grammar_manifest.py` — Conformance Test (Stage 11e)
 
-#### Lint BISC error handling (archived)
+Behavioral conformance test that decouples from validator internals.
 
-The round-1 issue "missing OSError/Exception handling" is resolved by matching the BISC contract used in `reference/babel/__main__.py`: `try` calls `bsl_validator.validate_file(path)`; `except BabelParseError` emits structured path/line/code JSON to stderr and exits 6; `except OSError` emits path/file_error JSON and exits 6; `except Exception` emits internal_error JSON and exits 6.
+**Test flow:**
 
-#### Test fragility (archived)
+1. Read `reference/babel/bsl_validator.py` source.
+2. Extract the grammar manifest comment block via regex `r'^# Grammar Manifest\n(?:# .*\n)*'`.
+3. Compile the documented header regex from the manifest and assert it matches the effective pattern used by `validate_header` (call `validate_header` with valid/invalid headers, assert matching/raising behavior).
+4. For each block type, construct a `kv_pairs` list with **all** required keys and assert `validate_body_kv(block_type, kv_pairs, line_no=0)` does not raise.
+5. For each block type, construct a `kv_pairs` list **missing one** required key and assert `validate_body_kv` raises `BabelParseError` with the expected `code` attribute.
 
-The round-1 issue "internal REQUIRED_KEYS dict access" is resolved by replacing it with behavioral assertions: construct complete `kv_pairs` for each block type and assert no error; construct incomplete sets and assert `BabelParseError` with the expected code. The test is now decoupled from the validator's internal naming.
+**Decoupling guarantee:** the test does NOT access the internal `REQUIRED_KEYS` dict (or any private name) in `bsl_validator.py`. All assertions are behavioral — they call the public validator API and observe pass/fail. This keeps the test stable across refactors of the validator's internal data structures.
 
-### Stage 11f — Doc Sweep (deferred)
+#### Archived (resolved) blockers from 11b/11d/11e audit rounds 1-3
 
-Human-facing README/CHANGELOG updates documenting the lint CLI subcommand, grammar manifest, and conformance test for human consumers. Held until 11b/11d/11e are committed.
+- **Round 1 (resolved):** BISC error handling gap (lint subcommand missing `OSError` and `Exception` handlers) — fixed by adding the two `except` branches matching the `__main__.py` BISC contract.
+- **Round 1 (resolved):** test fragility from internal `REQUIRED_KEYS` dict access — fixed by switching the conformance test to behavioral assertions only.
+- **Round 2 (resolved):** handoff required key count ambiguity (`9 HANDOFF_SCHEMA keys + version` unclear whether HANDOFF_SCHEMA already contained `version`) — resolved by inspecting `handoff.py` to confirm the 9 payload keys are exactly `{path, content, agent_id, next_owner, signoff, blocking_issues, required_changes, summary, memory_note}` and `version` is a separate 10th BSL syntax-layer key.
+- **Round 3 (signoff):** all blockers resolved with prescriptive fixes; DeepSeek signoff=true on the final plan.
 
-### Carry-over
+### Stage 11f — Doc Sweep (this round, signoff)
 
-- **Stages 5a/5b** (v0.10.2 cycle): `append_handoff` implementation and test patch.
-- **Stage 7b**: BISC section 5 amendment formalizing the 9-key handoff block content dict schema in `autonomy-output/babel-bisc-integrity-v0.10.2.md`. Recommend adding explicit version note in the file header rather than renaming to preserve BISC pre-commit hook links.
-- **Prerequisite micro-patch** (if not yet committed): `bsl_validator.py` signature change `validate_version(expected_version, version, line_no)` and removal of `BABEL_VERSION` import from `handoff.py`.
+Human-facing documentation of the validation surface shipped in stages 11b/11d/11e. Held as a single-file-pair round (README + CHANGELOG only) to preserve the anti-timeout cadence that has held timeouts at zero across the last 12+ successful rounds. The 8+ TimeoutError entries in the notes tail on this exact stage confirm that any multi-file code/spec delivery on this stage risks runtime failure.
+
+The next stage (12a) is the BISC amendment that formalizes this validation surface in `autonomy-output/babel-bisc-integrity-v0.10.2.md` with new sections 5.3 (Grammar Manifest), 5.4 (Lint CLI Contract), and 5.5 (Multi-Agent Append Contract). It will be delivered as a separate single-file finalize round.
+
+### Coder Completion Log (v0.10.3 surface)
+
+| Stage | Module                              | Status   |
+|-------|-------------------------------------|----------|
+| 9a    | `reference/babel/handoff.py`        | Committed — `HANDOFF_SCHEMA` TypedDict (9 payload keys) |
+| 9b    | `reference/tests/test_handoff_append.py` | Committed — conformance assertions |
+| 10b   | `reference/babel/bsl_validator.py`  | Committed — `validate_header` / `validate_body_kv` / `validate_version` / `validate_file`, extra-keys policy REJECT |
+| 11a   | `reference/babel/bsl_validator.py`  | Committed — `validate_block_string` (direct-call composition using header-derived block_type) |
+| 11a2  | `reference/babel/handoff.py`        | Committed — `_encode_handoff_value` / `_decode_handoff_value` (str / list / bool), `HandoffIntegrityError`, pre-write validation gate |
+| Prereq| `reference/babel/bsl_validator.py`  | Committed — `validate_version(expected_version, version, line_no)` parameterization, `BABEL_VERSION` import removed from `handoff.py` |
+| 11b   | `reference/babel/companion.py`      | Committed — `lint_subcommand` with `BabelParseError` + `OSError` + `Exception` handlers |
+| 11d   | `reference/babel/bsl_validator.py`  | Committed — grammar manifest comment block with explicit key name lists |
+| 11e   | `reference/tests/test_grammar_manifest.py` | Committed — behavioral conformance test (no internal dict access) |
+| 11f   | `README.md` + `CHANGELOG.md`        | This round — doc sweep signoff |
+| 12a   | `autonomy-output/babel-bisc-integrity-v0.10.2.md` | Next round — BISC amendment (Section 5.3, 5.4, 5.5) |
+| 12b   | TBD                                  | Deferred — write-serialization primitive for `append_handoff` |
+
+## Tuning Profiles
+
+- `balanced` — default workhorse profile.
+- `precise` — code review, facts, infrastructure (used by DeepSeek audit role).
+- `fast` — quick checks, low-latency responses.
+- `deep` — planning, broad analysis, architecture kickoff (used by Kimi role).
+
+Profile rebuild: `rebuild-ollama-models minimadmax --profile <name>`. Verify with a short smoke test after rebuild.
 
 ## Anti-Timeout Cadence
 
-This stage ships only the two paired documentation files (README + CHANGELOG). The 8+ TimeoutError entries in the notes tail on this exact stage confirm that multi-file code/spec delivery risks runtime failure. All implementation stages (11b, 11d, 11e) are explicitly named with file paths, function signatures, and gate dependencies so the next artifact-writing stage can attempt the smallest atomic unit without waiting on further architecture decisions.
+The multi-agent pipeline has documented 8+ `TimeoutError` failures on the `pair_b_finalize` stage when attempting multi-file code/spec delivery. The single-file-pair pattern (one code/spec file + README + CHANGELOG) has held timeouts at zero across the last 12+ rounds. This stage always ships exactly the two paired human-readable tracking files (README, CHANGELOG) plus at most one code/spec file. Multi-file code/spec edits are split into sequential single-file finalize rounds.
+
+## Identity / Self-Configuration
+
+- `identities/minimadmax.json` — agent identity, display name, role, goals, constraints.
+- `prompts/scaffolds/minimadmax_reasoning_scaffold.md` — reasoning scaffold for `pair_b_finalize` and related stages.
+- `orchestrator/round_config.json` — round config (anti-timeout cadence, gate dependencies).
+
+Self-configuration edits follow the source-controlled protocol: propose full-file content, commit via `gh`, rebuild with `rebuild-ollama-models`, verify with smoke test.

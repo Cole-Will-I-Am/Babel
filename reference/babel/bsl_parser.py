@@ -44,7 +44,7 @@ TYPE_ENUM_RANK = {
 # Header regex: #[type]:id@version
 HEADER_REGEX = re.compile(r'^#\[(\w+)\]:([^@]+)@([^\s]+)$')
 
-# File header regex: #[babel]:v*.*.* (relaxed: optional 'v' prefix, flexible version)
+# File header regex: #[babel]:v*.*.* (permissive: optional 'v' prefix, standard semver)
 FILE_HEADER_REGEX = re.compile(r'^#\[babel\]:v?\d+\.\d+\.\d+')
 
 
@@ -219,26 +219,21 @@ def _normalize(
     """
     Normalize and validate blocks.
     
-    - Check version consistency across all blocks FIRST
-    - Sort body by (TYPE_ENUM_RANK[type], id)
-    - Detect duplicate (type, id) across body+handoffs
+    - Check version consistency across ALL blocks (body + handoffs) FIRST
+    - Check for duplicate (type, id) across ALL blocks
     - Validate exactly one intent block with minimal schema
+    - Sort body by (TYPE_ENUM_RANK[type], id)
     
     Returns sorted body list.
     Raises BabelParseError on validation failure.
     """
+    # Combine all blocks for validation
     all_blocks = body + handoffs
     
-    # 1. Check version consistency FIRST (before duplicate check)
-    versions: Dict[str, List[BabelBlock]] = {}
-    for block in all_blocks:
-        if block.version not in versions:
-            versions[block.version] = []
-        versions[block.version].append(block)
-    
-    if len(versions) > 1:
-        # Find the first block with a different version
-        first_version = next(iter(versions))
+    # 1. Check version consistency FIRST (before any other validation)
+    # This must check ALL blocks including handoffs
+    if all_blocks:
+        first_version = all_blocks[0].version
         for block in all_blocks:
             if block.version != first_version:
                 raise BabelParseError(
@@ -317,7 +312,7 @@ def parse_file(path: Path) -> BabelFile:
     # Read file
     content = path.read_text(encoding='utf-8')
     
-    # Validate file header (relaxed: any #[babel]:v*.*.* format)
+    # Validate file header (permissive: any #[babel]:v*.*.* format)
     lines = content.split('\n')
     header_found = False
     for line in lines:
