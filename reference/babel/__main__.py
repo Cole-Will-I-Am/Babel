@@ -1,5 +1,4 @@
-"""
-Babel v0.10.2 CLI Wrapper (BISC)
+"""Babel v0.10.2 CLI Wrapper (BISC)
 
 Implements the BISC CLI contract from babel-bisc-integrity-v0.10.2.md:
 - Catches BabelParseError and re-emits stderr JSON as-is
@@ -48,6 +47,7 @@ def main() -> int:
     
     except BabelParseError as e:
         # Re-emit library error as-is (section 4.2)
+        # to_stderr_json() already returns JSON without trailing newline
         sys.stderr.write(e.to_stderr_json())
         sys.stderr.write('\n')
         return 6

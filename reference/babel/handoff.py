@@ -1,115 +1,189 @@
-"""Babel v0.10.2 handoff protocol.
+"""Babel v0.10.3 handoff protocol.
 
 Implements the append-only handoff collaboration record protocol and
 read-side query methods for multi-agent continuity.
 
 Exports:
-- BABEL_VERSION: str = '0.10.2'
+- BABEL_VERSION: str = '0.10.3'
 - HANDOFF_SCHEMA: TypedDict with 9 collaboration keys
 - append_handoff(path, content, agent_id, next_owner, signoff, blocking_issues, required_changes, summary, memory_note) -> tuple[bool, str]
 - get_latest_handoff(path) -> dict | None
 - list_handoffs(path) -> tuple[dict, ...]
+- HandoffIntegrityError: Exception raised on pre-write validation failure
+
+Uses Python 3.12 stdlib only. Reuses orchestrator/canonical.py for serialization.
+Reuses bsl_validator.validate_block_string for pre-write gate.
 """
 
 import hashlib
 import json
-import re
+import tempfile
+import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, TypedDict
+from typing import Any, TypedDict
 
 from orchestrator.canonical import canonical_json
-
-# Import only the exception class to avoid circular import
-from reference.babel.bsl_parser import BabelParseError, parse_file, write_file
-
-
-BABEL_VERSION = '0.10.2'
+from .bsl_parser import BabelParseError, parse_babel_file
+from .bsl_validator import validate_block_string
 
 
-class HANDOFF_SCHEMA(TypedDict, total=False):
-    """Schema for handoff block content per Babel v0.10.2 spec."""
+BABEL_VERSION = '0.10.3'
+
+
+class HANDOFF_SCHEMA(TypedDict):
+    """Frozen schema for handoff block content dict.
+    
+    All 9 collaboration keys plus version (10 total) are required.
+    """
     path: str
     content: str
     agent_id: str
     next_owner: str
     signoff: bool
-    blocking_issues: List[str]
-    required_changes: List[str]
+    blocking_issues: list[str]
+    required_changes: list[str]
     summary: str
     memory_note: str
 
 
-def _compute_handoff_id(content: str, agent_id: str) -> str:
-    """
-    Compute deterministic handoff ID from content and agent.
+class HandoffIntegrityError(Exception):
+    """Exception raised when pre-write validation fails.
     
-    Format: agent_id + ':' + sha256(content)[:16]
-    This provides idempotency: same content from same agent = same ID.
+    Carries the error code and line number from the underlying BabelParseError.
     """
-    content_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()[:16]
-    return f'{agent_id}:{content_hash}'
+    def __init__(self, message: str, code: str, line_no: int):
+        super().__init__(message)
+        self.code = code
+        self.line_no = line_no
 
 
-def _get_next_sequential_id(existing_handoffs: List[Dict[str, Any]]) -> str:
+def _encode_handoff_value(key: str, value: Any) -> str:
+    """Encode a handoff value to a raw string for BSL body.
+    
+    Encoding contract:
+    - str: passthrough
+    - list[str]: compact JSON via json.dumps(separators=(',', ':'))
+    - bool: lowercase 'true' or 'false'
+    
+    Args:
+        key: The key name (for type inference)
+        value: The value to encode
+        
+    Returns:
+        Raw string suitable for BSL body
     """
-    Compute next sequential handoff ID.
+    if isinstance(value, bool):
+        return 'true' if value else 'false'
+    elif isinstance(value, list):
+        return json.dumps(value, separators=(',', ':'))
+    else:
+        return str(value)
+
+
+def _decode_handoff_value(key: str, raw: str) -> Any:
+    """Decode a raw BSL body string to the appropriate Python type.
     
-    Format: handoff-{n} where n = max(existing) + 1, or handoff-1 if none exist.
+    Decoding contract (symmetric with _encode_handoff_value):
+    - signoff key: 'true' -> True, 'false' -> False
+    - list keys (blocking_issues, required_changes): json.loads
+    - other keys: passthrough as str
+    
+    Args:
+        key: The key name (for type inference)
+        raw: The raw string from BSL body
+        
+    Returns:
+        Decoded Python value
     """
-    if not existing_handoffs:
-        return 'handoff-1'
+    if key == 'signoff':
+        if raw == 'true':
+            return True
+        elif raw == 'false':
+            return False
+        else:
+            raise ValueError(f"Invalid bool value for signoff: {raw!r}")
+    elif key in ('blocking_issues', 'required_changes'):
+        return json.loads(raw)
+    else:
+        return raw
+
+
+def _compute_handoff_id(content: dict, agent_id: str) -> str:
+    """Compute deterministic handoff ID via SHA256.
     
-    # Extract numeric suffixes from existing handoff IDs
-    max_num = 0
-    for handoff in existing_handoffs:
-        handoff_id = handoff.get('id', '')
-        match = re.match(r'handoff-(\d+)', handoff_id)
-        if match:
-            num = int(match.group(1))
-            if num > max_num:
-                max_num = num
+    Prepends agent_id to content before hashing for idempotency.
+    Returns 'handoff-{n}' where n is the sequential count.
     
-    return f'handoff-{max_num + 1}'
+    Args:
+        content: The handoff content dict
+        agent_id: The agent's identity string
+        
+    Returns:
+        Handoff ID string
+    """
+    canonical = canonical_json(content)
+    prefixed = f"## agent: {agent_id}\n{canonical}"
+    hash_hex = hashlib.sha256(prefixed.encode('utf-8')).hexdigest()
+    return f"handoff-{hash_hex[:12]}"
+
+
+def _get_next_handoff_number(path: Path) -> int:
+    """Get the next sequential handoff number for a file.
+    
+    Args:
+        path: Path to the .babel file
+        
+    Returns:
+        Next handoff number (1 if no existing handoffs)
+    """
+    if not path.exists():
+        return 1
+    
+    try:
+        blocks = parse_babel_file(str(path))
+        handoff_count = sum(1 for b in blocks if b['type'] == 'handoff')
+        return handoff_count + 1
+    except BabelParseError:
+        return 1
 
 
 def append_handoff(
-    path: Path,
+    path: Path | str,
     content: str,
     agent_id: str,
     next_owner: str,
     signoff: bool,
-    blocking_issues: List[str],
-    required_changes: List[str],
+    blocking_issues: list[str],
+    required_changes: list[str],
     summary: str,
     memory_note: str,
-) -> Tuple[bool, str]:
-    """
-    Append a handoff block to a .babel file.
+) -> tuple[bool, str]:
+    """Append a handoff block to a .babel file.
+    
+    Pre-write validation gate: validates the constructed block before any disk write.
+    Raises HandoffIntegrityError if validation fails (no file left behind).
     
     Args:
-        path: Path to .babel file.
-        content: Raw content string being handed off.
-        agent_id: ID of the agent performing the handoff.
-        next_owner: ID of the next agent to receive the handoff.
-        signoff: Whether this handoff represents a signoff.
-        blocking_issues: List of blocking issue descriptions.
-        required_changes: List of required change descriptions.
-        summary: Human-readable summary of the handoff.
-        memory_note: Durable note for future sessions.
-    
+        path: Path to the .babel file
+        content: The handoff content (text)
+        agent_id: The agent's identity string
+        next_owner: The next agent to take ownership
+        signoff: Whether this handoff is signed off
+        blocking_issues: List of blocking issue descriptions
+        required_changes: List of required change descriptions
+        summary: Human-readable summary
+        memory_note: Durable note for future sessions
+        
     Returns:
-        Tuple of (success, handoff_id). If handoff already exists (idempotent),
-        returns (False, existing_id). On success, returns (True, new_id).
-    
+        tuple[was_appended, handoff_id] where was_appended is False if duplicate
+        
     Raises:
-        BabelParseError: If file parsing fails.
-        OSError: If file I/O fails.
+        HandoffIntegrityError: If pre-write validation fails
     """
-    # Parse existing file
-    babel_file = parse_file(path)
+    path = Path(path)
     
-    # Build handoff content dict per schema
-    handoff_content: Dict[str, Any] = {
+    # Build content dict per HANDOFF_SCHEMA
+    handoff_content = {
         'path': str(path),
         'content': content,
         'agent_id': agent_id,
@@ -119,105 +193,137 @@ def append_handoff(
         'required_changes': required_changes,
         'summary': summary,
         'memory_note': memory_note,
+        'version': BABEL_VERSION,
     }
     
-    # Compute deterministic handoff ID for idempotency check
-    content_for_id = canonical_json(handoff_content)
-    proposed_id = _compute_handoff_id(content_for_id, agent_id)
+    # Compute handoff ID
+    handoff_id = _compute_handoff_id(handoff_content, agent_id)
     
-    # Check for existing handoff with same ID (idempotency)
-    for existing in babel_file.handoffs:
-        existing_content = existing.content
-        if isinstance(existing_content, dict):
-            existing_id = existing_content.get('id', '')
-            if existing_id == proposed_id:
-                return (False, existing_id)
+    # Check for idempotency (duplicate content skip)
+    if path.exists():
+        try:
+            blocks = parse_babel_file(str(path))
+            for block in blocks:
+                if block.get('id') == handoff_id:
+                    return (False, handoff_id)
+        except BabelParseError:
+            pass  # Continue with append if file is unparseable
     
-    # Compute next sequential ID
-    handoff_id = _get_next_sequential_id(babel_file.handoffs)
-    handoff_content['id'] = handoff_id
+    # Build block string for validation
+    header = f"/blocks/handoff:{handoff_id}"
+    kv_pairs = [
+        (key, _encode_handoff_value(key, value))
+        for key, value in handoff_content.items()
+    ]
     
-    # Build handoff block header and content
-    handoff_header = f'#[handoff]:{handoff_id}@{BABEL_VERSION}'
-    handoff_block_content = json.dumps(handoff_content, indent=2, sort_keys=True)
+    # Pre-write validation gate
+    try:
+        validate_block_string('handoff', header, kv_pairs)
+    except BabelParseError as e:
+        raise HandoffIntegrityError(str(e), code=e.code, line_no=e.line_no)
     
-    # Read original file content
-    original_content = path.read_text(encoding='utf-8')
+    # Construct block text
+    block_lines = [header]
+    for key, raw_value in kv_pairs:
+        block_lines.append(f"{key}: {raw_value}")
+    block_lines.append('')  # Empty line terminator
+    block_text = '\n'.join(block_lines)
     
-    # Append handoff block
-    new_content = original_content.rstrip() + '\n\n' + handoff_header + '\n' + handoff_block_content + '\n'
+    # Atomic write via tempfile + rename
+    parent = path.parent
+    parent.mkdir(parents=True, exist_ok=True)
     
-    # Write atomically
-    write_file(path, new_content)
+    fd, tmp_path = tempfile.mkstemp(dir=parent, prefix='.handoff_', suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            if path.exists():
+                f.write(path.read_text(encoding='utf-8'))
+            f.write(block_text)
+        os.replace(tmp_path, path)
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
     
     return (True, handoff_id)
 
 
-def get_latest_handoff(path: Path) -> Optional[Dict[str, Any]]:
-    """
-    Get the most recent handoff from a .babel file.
+def get_latest_handoff(path: Path | str) -> dict | None:
+    """Get the most recent handoff from a .babel file.
     
     Args:
-        path: Path to .babel file.
-    
+        path: Path to the .babel file
+        
     Returns:
-        Dict with frozen schema keys if handoffs exist, None otherwise.
-    
+        Handoff content dict with 9 frozen keys, or None if no handoffs
+        
     Raises:
-        BabelParseError: If file parsing fails.
-        OSError: If file I/O fails.
+        BabelParseError: If file is unparseable
     """
-    babel_file = parse_file(path)
-    
-    if not babel_file.handoffs:
+    path = Path(path)
+    if not path.exists():
         return None
     
-    # Return last handoff with frozen schema
-    last_handoff = babel_file.handoffs[-1]
-    content = last_handoff.content
+    blocks = parse_babel_file(str(path))
+    handoffs = [b for b in blocks if b['type'] == 'handoff']
+    if not handoffs:
+        return None
     
-    if isinstance(content, dict):
-        return dict(content)  # Return a copy
-    
-    return None
+    latest = handoffs[-1]
+    return {
+        'path': latest.get('path', ''),
+        'content': latest.get('content', ''),
+        'agent_id': latest.get('agent_id', ''),
+        'next_owner': latest.get('next_owner', ''),
+        'signoff': latest.get('signoff', False),
+        'blocking_issues': latest.get('blocking_issues', []),
+        'required_changes': latest.get('required_changes', []),
+        'summary': latest.get('summary', ''),
+        'memory_note': latest.get('memory_note', ''),
+    }
 
 
-def list_handoffs(path: Path) -> Tuple[Dict[str, Any], ...]:
-    """
-    List all handoffs from a .babel file in sequential order.
+def list_handoffs(path: Path | str) -> tuple[dict, ...]:
+    """List all handoffs from a .babel file in sequential order.
     
     Args:
-        path: Path to .babel file.
-    
+        path: Path to the .babel file
+        
     Returns:
-        Tuple of dicts with frozen schema keys, sorted by handoff ID.
-    
+        Tuple of handoff content dicts sorted by handoff ID
+        
     Raises:
-        BabelParseError: If file parsing fails.
-        OSError: If file I/O fails.
+        BabelParseError: If file is unparseable
     """
-    babel_file = parse_file(path)
-    
-    if not babel_file.handoffs:
+    path = Path(path)
+    if not path.exists():
         return ()
     
+    blocks = parse_babel_file(str(path))
+    handoffs = [b for b in blocks if b['type'] == 'handoff']
+    
     # Sort by numeric suffix in handoff ID
-    def sort_key(h: Any) -> int:
-        content = h.content if hasattr(h, 'content') else h
-        if isinstance(content, dict):
-            handoff_id = content.get('id', '')
-            match = re.match(r'handoff-(\d+)', handoff_id)
-            if match:
-                return int(match.group(1))
+    def _sort_key(block: dict) -> int:
+        block_id = block.get('id', '')
+        # Extract numeric part after 'handoff-'
+        if block_id.startswith('handoff-'):
+            suffix = block_id[8:]
+            try:
+                return int(suffix)
+            except ValueError:
+                pass
         return 0
     
-    sorted_handoffs = sorted(babel_file.handoffs, key=sort_key)
+    handoffs.sort(key=_sort_key)
     
-    # Return tuple of dicts with frozen schema
-    result = []
-    for handoff in sorted_handoffs:
-        content = handoff.content
-        if isinstance(content, dict):
-            result.append(dict(content))
-    
-    return tuple(result)
+    return tuple({
+        'path': h.get('path', ''),
+        'content': h.get('content', ''),
+        'agent_id': h.get('agent_id', ''),
+        'next_owner': h.get('next_owner', ''),
+        'signoff': h.get('signoff', False),
+        'blocking_issues': h.get('blocking_issues', []),
+        'required_changes': h.get('required_changes', []),
+        'summary': h.get('summary', ''),
+        'memory_note': h.get('memory_note', ''),
+    } for h in handoffs)

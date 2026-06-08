@@ -1,5 +1,4 @@
-"""
-Babel v0.10.2 Reference Parser
+"""Babel v0.10.2 Reference Parser
 
 Implements the Babel Source Language (BSL) parser for .babel files.
 Public API is frozen for v0.10.2; logic implementation proceeds in stages 4a-4c.
@@ -45,8 +44,8 @@ TYPE_ENUM_RANK = {
 # Header regex: #[type]:id@version
 HEADER_REGEX = re.compile(r'^#\[(\w+)\]:([^@]+)@([^\s]+)$')
 
-# File header regex: #[babel]:v*.*.* (relaxed: optional 'v' prefix)
-FILE_HEADER_REGEX = re.compile(r'^#\[babel\]:v?\d+\.\d+\.\d+$')
+# File header regex: #[babel]:v*.*.* (relaxed: optional 'v' prefix, flexible version)
+FILE_HEADER_REGEX = re.compile(r'^#\[babel\]:v?\d+\.\d+\.\d+')
 
 
 def resolve_companion(path: Path) -> Path:
@@ -119,12 +118,23 @@ def _scan_file(content: str) -> Tuple[List[BabelBlock], List[BabelBlock]]:
     while i < len(lines):
         line = lines[i]
         
-        # Skip blank lines and non-header lines
-        if not line.strip() or not line.startswith('#['):
+        # Skip blank lines
+        if not line.strip():
             i += 1
             continue
         
-        # Try to match header
+        # Skip non-header lines (content lines)
+        if not line.startswith('#['):
+            i += 1
+            continue
+        
+        # Check if this is the file header (not a block header)
+        stripped = line.strip()
+        if FILE_HEADER_REGEX.match(stripped):
+            i += 1
+            continue
+        
+        # Try to match block header
         match = HEADER_REGEX.match(line)
         if not match:
             raise BabelParseError(
@@ -151,7 +161,8 @@ def _scan_file(content: str) -> Tuple[List[BabelBlock], List[BabelBlock]]:
         j = i + 1
         while j < len(lines):
             next_line = lines[j]
-            if next_line.strip().startswith('#['):
+            # Stop at next block header (not file header)
+            if next_line.startswith('#[') and HEADER_REGEX.match(next_line):
                 break
             content_lines.append(next_line)
             j += 1
