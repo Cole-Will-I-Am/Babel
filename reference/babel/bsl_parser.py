@@ -44,7 +44,7 @@ TYPE_ENUM_RANK = {
 # Header regex: #[type]:id@version
 HEADER_REGEX = re.compile(r'^#\[(\w+)\]:([^@]+)@([^\s]+)$')
 
-# File header regex: #[babel]: followed by any version-like string (maximally permissive)
+# File header regex: #[babel]: followed by any content (permissive for test files)
 FILE_HEADER_REGEX = re.compile(r'^#\[babel\]:')
 
 
@@ -258,7 +258,7 @@ def _normalize(
     intent_blocks = [b for b in body if b.type == 'intent']
     
     if len(intent_blocks) == 0:
-        # Line number: always line 1 (file header line) when intent is missing
+        # Line number: line 1 (file header line) when no intent block exists
         error_line = 1
         raise BabelParseError(
             code='missing_intent',
@@ -314,7 +314,7 @@ def parse_file(path: Path) -> BabelFile:
     # Read file
     content = path.read_text(encoding='utf-8')
     
-    # Validate file header (permissive: any #[babel]: format)
+    # Validate file header (permissive: #[babel]: followed by any content)
     lines = content.split('\n')
     header_found = False
     for line in lines:
