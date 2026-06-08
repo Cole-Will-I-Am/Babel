@@ -1,25 +1,44 @@
-"""Babel v0.10.2 handoff append protocol.
+"""Babel v0.10.2 handoff protocol.
 
-Implements the append-only handoff collaboration record protocol:
-- Sequential handoff-{n} IDs (max existing + 1, starting at handoff-1)
-- Raw-content SHA256 idempotency guard (agent-prefixed content)
-- Atomic rewrite via frozen parser API (parse_file/write_file)
+Implements the append-only handoff collaboration record protocol and
+read-side query methods for multi-agent continuity.
 
 Exports:
 - BABEL_VERSION: str = '0.10.2'
-- append_handoff: function with signature (path, content, agent_id, next_owner, blocking_issues, required_changes) -> tuple[bool, str]
+- append_handoff(path, content, agent_id, next_owner, signoff, blocking_issues, required_changes, summary, memory_note) -> tuple[bool, str]
+- get_latest_handoff(path) -> dict | None
+- list_handoffs(path) -> tuple[dict, ...]
+
+All code is Python 3.12 stdlib only. Reuses orchestrator/canonical.py
+for v0.2.0 canonical JSON serialization.
 """
 
 import hashlib
+import re
 from pathlib import Path
-from typing import List, Tuple
+from typing import Optional, Tuple
 
-from .bsl_parser import BabelBlock, parse_file, write_file
+from reference.babel.bsl_parser import BabelFile, BabelParseError, parse_file, write_file
+
+BABEL_VERSION = '0.10.2'
+
+__all__ = ['BABEL_VERSION', 'append_handoff', 'get_latest_handoff', 'list_handoffs']
+
+# Handoff ID pattern: handoff-{n}
+HANDOFF_ID_PATTERN = re.compile(r'^handoff-(\d+)$')
 
 
-BABEL_VERSION: str = '0.10.2'
+def _compute_content_sha256(content: str) -> str:
+    """Compute SHA256 of raw content string."""
+    return hashlib.sha256(content.encode('utf-8')).hexdigest()
 
-__all__ = ['BABEL_VERSION', 'append_handoff']
+
+def _extract_handoff_id_number(handoff_id: str) -> int:
+    """Extract numeric suffix from handoff-{n} ID."""
+    match = HANDOFF_ID_PATTERN.match(handoff_id)
+    if not match:
+        return 0
+    return int(match.group(1))
 
 
 def append_handoff(
@@ -27,129 +46,197 @@ def append_handoff(
     content: str,
     agent_id: str,
     next_owner: str,
-    blocking_issues: List[str],
-    required_changes: List[str],
+    signoff: bool,
+    blocking_issues: list[str],
+    required_changes: list[str],
+    summary: str,
+    memory_note: str,
 ) -> Tuple[bool, str]:
     """
     Append a handoff block to a .babel file.
     
+    Per v0.10.2 spec:
+    - Prepends '## agent: <agent_id>\\n' to content before SHA256
+    - Sequential handoff-{n} IDs (max existing + 1, starting at handoff-1)
+    - Idempotency: if SHA256 matches most recent handoff, skip append
+    - Atomic rewrite via parse_file/write_file
+    
     Args:
-        path: Path to the .babel file.
-        content: Handoff content string.
-        agent_id: ID of the agent appending this handoff.
-        next_owner: ID of the next agent to receive the handoff.
-        blocking_issues: List of blocking issue descriptions.
-        required_changes: List of required change descriptions.
+        path: Path to .babel file
+        content: Proposed handoff content (raw text)
+        agent_id: Agent identifier for attribution
+        next_owner: Next agent to receive this handoff
+        signoff: Whether this handoff is signed off
+        blocking_issues: List of blocking issue descriptions
+        required_changes: List of required change descriptions
+        summary: Concise summary of this handoff
+        memory_note: Durable note for future sessions
     
     Returns:
-        Tuple of (appended, handoff_id) where:
-        - appended: True if handoff was appended, False if skipped (idempotency).
-        - handoff_id: The handoff block ID (e.g., 'handoff-1').
+        (True, handoff_id) on successful append
+        (False, existing_id) on idempotency skip
     
-    Protocol:
-        1. Parse the .babel file using frozen parser API.
-        2. Generate sequential handoff-{n} ID (max existing + 1, starting at handoff-1).
-        3. Prepend '## agent: <agent_id>\n' to content for attribution.
-        4. Compute SHA256 of agent-prefixed content for idempotency check.
-        5. If handoffs exist and hash matches most recent, skip append (return False, existing_id).
-        6. Otherwise, create handoff block with content dict schema and append.
-        7. Write file atomically via frozen parser API.
-    
-    Errors:
-        - BabelParseError: Propagates to CLI wrapper for structured stderr.
-        - OSError: Propagates to CLI wrapper for file_error.
+    Raises:
+        BabelParseError: If .babel file is invalid
+        OSError: If file read/write fails
     """
-    # Parse the file using frozen parser API
+    # Parse existing file
     babel_file = parse_file(path)
     
-    # Generate sequential handoff ID
-    handoff_ids = []
-    for block in babel_file.handoffs:
-        if block.id.startswith('handoff-'):
-            try:
-                n = int(block.id.split('-')[1])
-                handoff_ids.append(n)
-            except (ValueError, IndexError):
-                pass
-    
-    if handoff_ids:
-        next_n = max(handoff_ids) + 1
-    else:
-        next_n = 1
-    
-    next_id = f'handoff-{next_n}'
-    
-    # Build handoff content with agent attribution
-    agent_header = f'## agent: {agent_id}\n'
-    prefixed_content = agent_header + content
-    
-    # Compute SHA256 for idempotency check
-    content_hash = hashlib.sha256(prefixed_content.encode('utf-8')).hexdigest()
-    
-    # Check idempotency: if handoffs exist and hash matches most recent, skip
-    if babel_file.handoffs:
-        most_recent = babel_file.handoffs[-1]
-        if isinstance(most_recent.content, dict):
-            existing_content = most_recent.content.get('content', '')
-            existing_hash = hashlib.sha256(existing_content.encode('utf-8')).hexdigest()
-        else:
-            existing_content = str(most_recent.content) if most_recent.content else ''
-            existing_hash = hashlib.sha256(existing_content.encode('utf-8')).hexdigest()
-        
-        if content_hash == existing_hash:
-            return (False, most_recent.id)
-    
-    # Build handoff block content dict per schema
+    # Build handoff content dict with full schema
     handoff_content = {
         'path': str(path),
         'content': content,
         'agent_id': agent_id,
+        'next_owner': next_owner,
+        'signoff': signoff,
         'blocking_issues': blocking_issues,
         'required_changes': required_changes,
+        'summary': summary,
+        'memory_note': memory_note,
     }
     
-    # Create handoff block
-    handoff_block = BabelBlock(
+    # Compute SHA256 of agent-prefixed content for idempotency
+    agent_prefixed = f'## agent: {agent_id}\n{content}'
+    content_sha256 = _compute_content_sha256(agent_prefixed)
+    
+    # Check idempotency: if handoffs exist and SHA256 matches most recent, skip
+    if babel_file.handoffs:
+        most_recent = babel_file.handoffs[-1]
+        existing_sha256 = _compute_content_sha256(most_recent.content)
+        if existing_sha256 == content_sha256:
+            return (False, most_recent.id)
+    
+    # Generate sequential handoff ID
+    max_n = 0
+    for handoff in babel_file.handoffs:
+        n = _extract_handoff_id_number(handoff.id)
+        if n > max_n:
+            max_n = n
+    next_id = f'handoff-{max_n + 1}'
+    
+    # Build handoff block content as JSON string (raw content for block)
+    import json
+    block_content = json.dumps(handoff_content, sort_keys=True, indent=2)
+    
+    # Create new handoff block
+    from reference.babel.bsl_parser import BabelBlock
+    new_handoff = BabelBlock(
         type='handoff',
         id=next_id,
         version=babel_file.version,
-        header_line=0,
+        header_line=0,  # Will be set when written
         content=handoff_content,
     )
     
     # Append to handoffs list
-    babel_file.handoffs.append(handoff_block)
+    babel_file.handoffs.append(new_handoff)
     
-    # Write file atomically via frozen parser API
-    # We need to serialize the file back - use the parser's write_file
-    # Since write_file expects a string, we need to reconstruct the file content
-    # For now, we'll call write_file with a reconstructed content
-    # This is a simplification - the full implementation would serialize BabelFile
+    # Rebuild file content
+    file_lines = [f'#[babel]:v{babel_file.version}']
     
-    # Reconstruct file content from parsed structure
-    lines = []
-    lines.append(f'#[babel]:{babel_file.version}')
-    lines.append('')
-    
-    # Write body blocks (sorted by type rank, id)
-    from .bsl_parser import TYPE_ENUM_RANK
-    sorted_body = sorted(babel_file.body, key=lambda b: (TYPE_ENUM_RANK.get(b.type, 99), b.id))
-    for block in sorted_body:
-        lines.append(f'#[{block.type}]:{block.id}@{block.version}')
+    # Add body blocks
+    for block in babel_file.body:
+        file_lines.append('')
+        file_lines.append(f'#[{block.type}]:{block.id}@{block.version}')
         if block.content is not None:
-            import json
-            lines.append(json.dumps(block.content, indent=2, sort_keys=False))
-        lines.append('')
+            block_json = json.dumps(block.content, sort_keys=True, indent=2)
+            file_lines.append(block_json)
     
-    # Write handoff blocks (chronological order)
+    # Add handoff blocks
     for block in babel_file.handoffs:
-        lines.append(f'#[{block.type}]:{block.id}@{block.version}')
+        file_lines.append('')
+        file_lines.append(f'#[{block.type}]:{block.id}@{block.version}')
         if block.content is not None:
-            import json
-            lines.append(json.dumps(block.content, indent=2, sort_keys=False))
-        lines.append('')
+            block_json = json.dumps(block.content, sort_keys=True, indent=2)
+            file_lines.append(block_json)
     
-    file_content = '\n'.join(lines)
+    file_content = '\n'.join(file_lines) + '\n'
+    
+    # Atomic write
     write_file(path, file_content)
     
     return (True, next_id)
+
+
+def get_latest_handoff(path: Path) -> Optional[dict]:
+    """
+    Get the most recent handoff from a .babel file.
+    
+    Args:
+        path: Path to .babel file
+    
+    Returns:
+        dict with keys: id, agent_id, content, blocking_issues, required_changes, next_owner, signoff, summary, memory_note
+        None if no handoffs exist
+    
+    Raises:
+        BabelParseError: If .babel file is invalid
+        OSError: If file read fails
+    """
+    babel_file = parse_file(path)
+    
+    if not babel_file.handoffs:
+        return None
+    
+    latest = babel_file.handoffs[-1]
+    
+    # Extract handoff content (already a dict from parser)
+    handoff_data = latest.content
+    
+    # Build result dict with frozen schema
+    return {
+        'id': latest.id,
+        'agent_id': handoff_data.get('agent_id', ''),
+        'content': handoff_data.get('content', ''),
+        'blocking_issues': handoff_data.get('blocking_issues', []),
+        'required_changes': handoff_data.get('required_changes', []),
+        'next_owner': handoff_data.get('next_owner', ''),
+        'signoff': handoff_data.get('signoff', False),
+        'summary': handoff_data.get('summary', ''),
+        'memory_note': handoff_data.get('memory_note', ''),
+    }
+
+
+def list_handoffs(path: Path) -> Tuple[dict, ...]:
+    """
+    List all handoffs from a .babel file in sequential order.
+    
+    Args:
+        path: Path to .babel file
+    
+    Returns:
+        Tuple of dicts, each with keys: id, agent_id, content, blocking_issues, required_changes, next_owner, signoff, summary, memory_note
+        Empty tuple if no handoffs exist
+    
+    Raises:
+        BabelParseError: If .babel file is invalid
+        OSError: If file read fails
+    """
+    babel_file = parse_file(path)
+    
+    if not babel_file.handoffs:
+        return ()
+    
+    # Sort by numeric handoff ID suffix
+    sorted_handoffs = sorted(
+        babel_file.handoffs,
+        key=lambda h: _extract_handoff_id_number(h.id)
+    )
+    
+    result = []
+    for handoff in sorted_handoffs:
+        handoff_data = handoff.content
+        result.append({
+            'id': handoff.id,
+            'agent_id': handoff_data.get('agent_id', ''),
+            'content': handoff_data.get('content', ''),
+            'blocking_issues': handoff_data.get('blocking_issues', []),
+            'required_changes': handoff_data.get('required_changes', []),
+            'next_owner': handoff_data.get('next_owner', ''),
+            'signoff': handoff_data.get('signoff', False),
+            'summary': handoff_data.get('summary', ''),
+            'memory_note': handoff_data.get('memory_note', ''),
+        })
+    
+    return tuple(result)

@@ -5,79 +5,107 @@ Autonomous multi-agent engineering runtime for the Babel/BCPR/BISC stack.
 ## Components
 
 - **Ollama runtime** — hosts `minimadmax:latest` and profile variants (`balanced`, `precise`, `fast`, `deep`).
-- **GitHub CLI auth** — local `gh` with HTTPS git-credential helper; target repos: `Cole-Will-I-Am/MiniMadMax`, `Cole-Will-I-Am/new-lab`.
-- **Babel/BCPR/BISC stack** — deterministic language surface, conflict-free protocol, and integrity spec for human+AI collaboration.
+- **GitHub CLI auth** — local `gh` with HTTPS git-credential helper; target repos: `Cole-Will-I-Am/MiniMadMax` (self-config) and `Cole-Will-I-Am/new-lab` (Babel/BCPR/BISC stack).
+- **Babel reference parser** — `reference/babel/bsl_parser.py` (frozen public API, parser core).
+- **Handoff protocol** — `reference/babel/handoff.py` (append + query, multi-agent continuity).
+- **Companion CLI** — `reference/babel/companion.py` (stdlib-only human interface).
+- **BISC pre-commit hooks** — enforce `.babel` file integrity and the BISC error taxonomy (eight codes).
+- **BCPR conflict log** — human-readable chain-of-handoff reader, consumes the BISC stderr JSON shape.
 
-## Babel v0.10.2 — Language Surface
+## Babel Project Layout
 
-Babel is a deterministic source format designed for conflict-free human+AI collaboration. The v0.10.2 cycle ships the contract-first bootstrap and reference parser implementation.
+A Babel project consists of two companion files in a single directory:
 
-### File Layout
+- `*.babel` — the deterministic, machine-readable source of truth (intent, spec, test, impl, handoff blocks).
+- `*.md` — the human-readable companion rendered from the `.babel` body (handoffs excluded from body sort, remain chronological).
 
-- `foo.babel` — machine-authored intent, spec, test, and impl blocks. Sorted body, deterministic.
-- `foo.md` — companion file, human-authored prose. Same basename, paired via `resolve_companion`.
+The `*.md` filename must share the basename of the `*.babel` file; this is the **companion_path contract** enforced by `companion.resolve_companion` and re-exported as `bsl_parser.companion_path`.
 
-### Block Types
+## Block Types
 
-- `#[intent]:<id>@<version>` — exactly one per file; declares the contract.
-- `#[spec]:<id>@<version>` — normative specification.
-- `#[test]:<id>@<version>` — executable test surface.
-- `#[impl]:<id>@<version>` — implementation reference.
-- `#[handoff]:<id>@<version>` — append-only collaboration record.
+- `#[intent]:<id>@<version>` — exactly one per body; carries `agent_id`.
+- `#[spec]:<id>@<version>` — normative spec block.
+- `#[test]:<id>@<version>` — test block.
+- `#[impl]:<id>@<version>` — implementation block.
+- `#[handoff]:handoff-{n}` — chronological handoff block; n starts at 1 and increments.
 
-### Cycle Stages (v0.10.2)
+## Babel Cycles (Releases)
 
-- **Stage 1a–1c** — contract bootstrap: skeleton modules and BWSS lifecycle mapping.
-- **Stage 2a–2b** — companion resolver skeleton: `reference/babel/companion.py`.
-- **Stage 3a–3b** — BISC integrity spec with parser error taxonomy and CLI exit contract.
-- **Stage 4a–4c** — reference parser: scanner, normalizer, writer, and CLI wrapper.
-- **Stage 5a–5b** — handoff append protocol with sequential IDs and content-hash idempotency.
+### v0.10.2 — Babel Language Surface (Unreleased)
 
-### BISC CLI
+Parser contract-first bootstrap. Sub-stages 1a-5b define the frozen public API, companion skeleton, BISC error taxonomy, scanner/normalize/writer/CLI logic, and handoff append protocol.
 
-`python -m reference.babel <file.babel>` validates the file against the BISC integrity spec.
+### v0.10.3 — Handoff Query + Companion CLI (Unreleased, planned)
 
-- Exit 0: silent success.
-- Exit 6: structured stderr JSON with one of the eight error codes.
+Read-side handoff query protocol and human-facing companion CLI. Sub-stages:
 
-### Error Codes (8 total)
+- **6.0 (patch)** — Bump `BABEL_VERSION` to `0.10.3` in `reference/babel/handoff.py`. Patch `append_handoff` to store `next_owner` in the handoff block body dict (keys: `path`, `content`, `agent_id`, `next_owner`, `blocking_issues`, `required_changes`). No signature change; `next_owner` is already a parameter per v0.10.2 stage 5a fixes.
+- **6a (query)** — Implement `get_latest_handoff(path) -> dict|None` and `list_handoffs(path) -> tuple[dict,...]` in `handoff.py` using `parse_file`. Return deserialized dicts with the **frozen handoff schema** (id, agent_id, content, blocking_issues, required_changes, next_owner). Sort by sequential handoff ID numeric suffix. Empty file returns `None` / `()`. Parser errors propagate as `BabelParseError`.
+- **6b (companion)** — Implement `reference/babel/companion.py` as a stdlib-only CLI with three subcommands: `init`, `render`, `validate`. Uses only `argparse`, `subprocess`, `json`, `pathlib`. Imports `handoff.py` query methods for `init`/`render`; `validate` shells out to `python -m babel <path>` via `subprocess.run` to preserve the zero-dependency boundary.
+- **6c (query tests)** — Author `reference/tests/test_handoff_query.py` covering deterministic ordering, empty file handling, parser error propagation, and schema compliance (all six frozen keys present, including `next_owner`).
+- **6d (companion tests)** — Author `reference/tests/test_companion_cli.py` covering `init` scaffolding, `render` formatted output, and `validate` exit codes (0 on valid, 6 on invalid) with BISC stderr JSON shape.
+- **6e (README)** — This document, human-readable summary of the v0.10.3 cycle. ✅ Shipped 2026-06-08.
+- **6f (CHANGELOG)** — ISO-dated entries for stages 4a-6d in `CHANGELOG.md`. ✅ Shipped 2026-06-08.
 
-**Library (parser):** `duplicate_id`, `version_mismatch`, `malformed_header`, `invalid_intent_json`, `missing_intent`, `multiple_intents`.
+## Handoff Block Schema (frozen, v0.10.3)
 
-**Process (CLI):** `file_error` (OSError), `internal_error` (unexpected Exception).
+Every handoff block in a `.babel` file deserializes to a dict with exactly six keys:
 
-The library/process contract is preserved: `parse_file` and `write_file` raise native Python exceptions (`BabelParseError`, `OSError`); the BISC CLI wrapper at `reference/babel/__main__.py` catches them and emits the BISC stderr JSON shape with exit code 6.
+| Key | Type | Description |
+|-----|------|-------------|
+| `id` | `str` | `handoff-{n}` where n is the sequential numeric suffix (1, 2, 3, ...). |
+| `agent_id` | `str` | Identifier of the agent writing the handoff. Also prepended to content as `## agent: <agent_id>\n` by `append_handoff`. |
+| `content` | `str` | Raw text of the handoff body, including the `## agent: <id>\n` prefix. |
+| `blocking_issues` | `list[str]` | Issues the writer could not resolve. Empty list when signoff=true. |
+| `required_changes` | `list[str]` | Follow-up work the next owner must perform. |
+| `next_owner` | `str \| None` | The agent that should pick up this handoff. Stored in body dict (stage 6.0) and returned by query methods (stage 6a). |
 
-### Handoff Protocol
+This schema is the wire format for multi-agent handoff chains. Any reader (companion, BCPR conflict log, future tooling) must consume all six keys.
 
-Handoff blocks are append-only collaboration records. Each handoff block has a sequential ID `handoff-{n}` (max existing + 1, starting at `handoff-1`). Content-hash idempotency guards against duplicate agent outputs on retry: the SHA256 is computed over the raw content string (prefixed with the agent header line `## agent: <agent_id>\n`).
-
-## Repository Layout
+## Companion CLI
 
 ```
-reference/
-  babel/
-    bsl_parser.py    # parse_file, write_file, to_virtual_json, companion_path
-    handoff.py       # append_handoff (stage 5a)
-    companion.py     # resolve_companion
-    __main__.py      # BISC CLI wrapper
-  tests/
-    test_bsl_parser_*.py
-    test_handoff_*.py
-autonomy-output/
-  babel-*.md         # Syntax, Integration, BISC, BCPR specs
-identities/
-  minimadmax.json    # identity record
-prompts/scaffolds/
-  minimadmax_reasoning_scaffold.md
-orchestrator/
-  round_config.json
+python -m babel.companion init   <path.babel>     # scaffold a new .babel with intent block
+python -m babel.companion render <path.babel>     # pretty-print handoffs in sequential order
+python -m babel.companion validate <path.babel>   # exit 0 valid, 6 invalid, BISC stderr JSON
 ```
 
-## Configuration
+- `init` — writes a minimal `.babel` file with an `#[intent]` block parseable by `bsl_parser.parse_file`.
+- `render` — calls `list_handoffs(path)` and prints each handoff as `--- handoff-{n} (agent: <id>) ---` followed by content.
+- `validate` — invokes `subprocess.run(['python', '-m', 'babel', path])`. Exits 0 on success, 6 on `BabelParseError` (reads stderr JSON), non-zero on subprocess failure.
 
-- **Identity:** `identities/minimadmax.json`
-- **Reasoning scaffold:** `prompts/scaffolds/minimadmax_reasoning_scaffold.md`
-- **Round config:** `orchestrator/round_config.json`
+The CLI depends only on the Python stdlib and the `handoff` module. It does **not** import `bsl_parser` directly; the `validate` boundary is the `python -m babel` subprocess, which is the single integration surface for any `.babel` file (including those checked by BISC pre-commit hooks).
 
-Rebuild with `rebuild-ollama-models <model>` and verify with a short smoke test after any config change. Tuning profiles live in `models/profiles/` (`balanced`, `precise`, `fast`, `deep`).
+## BISC CLI Exit Code Contract
+
+| Exit | Meaning |
+|------|---------|
+| 0 | Silent success |
+| 6 | BabelParseError — see BISC stderr JSON shape |
+
+The eight frozen error codes (see BISC integrity spec section 4):
+
+- **Library** (raised by `parse_file`): `duplicate_id`, `version_mismatch`, `malformed_header`, `invalid_intent_json`, `missing_intent`, `multiple_intents`.
+- **Process** (emitted by CLI wrapper): `file_error` (OSError), `internal_error` (unexpected Exception).
+
+The CLI wrapper catches native Python exceptions and translates to BISC stderr JSON:
+
+```json
+{"error": "<ExceptionClass>", "code": "<code>", "line": <int|null>, "message": "<str>"}
+```
+
+Compact canonical JSON v0.2.0, single line, no trailing newline.
+
+## Handoff Append Protocol
+
+`append_handoff(babel_path, content, agent_id) -> tuple[bool, str]` (planned, stage 5a):
+
+1. Read current `.babel` file via `parse_file`.
+2. Compute `max_n` from existing `handoff-{n}` IDs; next id is `handoff-{max_n + 1}` (or `handoff-1` if none).
+3. Prepend `## agent: <agent_id>\n` to the proposed content (human-visible attribution).
+4. Compute SHA256 of the prefixed content for the idempotency guard.
+5. If the most recent handoff has the same SHA256, return `(False, "handoff-{n}")` (idempotent skip).
+6. Otherwise, write the new handoff block atomically via `write_file` (tempfile + rename).
+7. Return `(True, "handoff-{n}")` on success.
+
+Errors propagate: `BabelParseError` on invalid input, `OSError` on filesystem failure (translated to `file_error` by the CLI wrapper).
