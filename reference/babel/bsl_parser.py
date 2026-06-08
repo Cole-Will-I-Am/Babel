@@ -259,7 +259,7 @@ def _normalize(
     intent_blocks = [b for b in body if b.type == 'intent']
     
     if len(intent_blocks) == 0:
-        # Line number: line 1 (file header line) when no intent block exists
+        # Line number: line 1 (file header line) per test expectation
         error_line = 1
         raise BabelParseError(
             code='missing_intent',
