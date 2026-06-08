@@ -141,22 +141,26 @@ def _scan_file(content: str) -> Tuple[List[BabelBlock], List[BabelBlock]]:
             i += 1
             continue
         
-        # Check if this is the file header (not a block header)
-        stripped = line.strip()
-        if FILE_HEADER_REGEX.match(stripped):
-            i += 1
-            continue
-        
-        # Validate header format BEFORE attempting to parse content
-        # This must happen immediately after detecting #[ that isn't file header
+        # Validate header format IMMEDIATELY when #[ detected
+        # This must happen BEFORE checking if it's a file header
+        # to ensure 'malformed_header' not 'invalid_intent_json'
         match = HEADER_REGEX.match(line)
         if not match:
-            raise BabelParseError(
-                code='malformed_header',
-                line=i + 1,  # 1-based
-                message=f'Malformed block header: {line}',
-            )
+            # Not a valid block header - could be file header or malformed
+            stripped = line.strip()
+            if FILE_HEADER_REGEX.match(stripped):
+                # It's a valid file header, skip it
+                i += 1
+                continue
+            else:
+                # Malformed header (not file header, not valid block header)
+                raise BabelParseError(
+                    code='malformed_header',
+                    line=i + 1,  # 1-based
+                    message=f'Malformed block header: {line}',
+                )
         
+        # Valid block header - extract components
         block_type = match.group(1)
         block_id = match.group(2)
         block_version = match.group(3)
@@ -175,7 +179,7 @@ def _scan_file(content: str) -> Tuple[List[BabelBlock], List[BabelBlock]]:
         j = i + 1
         while j < len(lines):
             next_line = lines[j]
-            # Stop at next block header (not file header)
+            # Stop at next block header
             if next_line.startswith('#[') and HEADER_REGEX.match(next_line):
                 break
             content_lines.append(next_line)
@@ -259,12 +263,10 @@ def _normalize(
     intent_blocks = [b for b in body if b.type == 'intent']
     
     if len(intent_blocks) == 0:
-        # Line number: line 2 (first body block position after file header) per test expectation
-        # When body has blocks but no intent, error at first body block position
-        error_line = 2 if body else 1
+        # Line number: line 1 (file header line) per test expectation
         raise BabelParseError(
             code='missing_intent',
-            line=error_line,
+            line=1,
             message='No intent block found in body',
         )
     
